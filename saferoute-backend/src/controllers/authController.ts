@@ -46,11 +46,18 @@ export async function login(req: Request, res: Response): Promise<void> {
     const days = parseInt(expiresIn) || 7;
     const maxAge = days * 24 * 60 * 60 * 1000;
 
+    // Cross-site (Vercel <-> Render) cookies require SameSite=None + Secure.
+    // Fall back to Lax for local dev (http://localhost), where None+Secure won't work.
+    const isProd = process.env.NODE_ENV === "production";
+    const crossSiteCookie = {
+      secure: isProd,
+      sameSite: (isProd ? "none" : "lax") as "none" | "lax",
+    };
+
     // Set HTTP-only cookie with the JWT (not accessible from JavaScript)
     res.cookie("saferoute_token", token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
+      ...crossSiteCookie,
       maxAge,
       path: "/",
     });
@@ -58,8 +65,7 @@ export async function login(req: Request, res: Response): Promise<void> {
     // Set readable role cookie for Next.js middleware route protection
     res.cookie("saferoute_role", user.role, {
       httpOnly: false,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
+      ...crossSiteCookie,
       maxAge,
       path: "/",
     });
@@ -196,8 +202,13 @@ export async function changePassword(req: Request & { user?: { userId: number } 
 }
 
 export async function logout(_req: Request, res: Response): Promise<void> {
-  res.clearCookie("saferoute_token", { path: "/" });
-  res.clearCookie("saferoute_role", { path: "/" });
+  const isProd = process.env.NODE_ENV === "production";
+  const crossSiteCookie = {
+    secure: isProd,
+    sameSite: (isProd ? "none" : "lax") as "none" | "lax",
+  };
+  res.clearCookie("saferoute_token", { path: "/", ...crossSiteCookie });
+  res.clearCookie("saferoute_role", { path: "/", ...crossSiteCookie });
   res.json({ message: "Logged out" });
 }
 
