@@ -252,9 +252,12 @@ export default function AdminDashboard() {
   });
   const activeBuses = activeTrips.length;
   const idleBuses = buses.length - activeBuses;
-  const alertCount = historyTrips.filter(
-    (t) => t.status === "cancelled",
-  ).length;
+  // Was previously derived from historyTrips filtered by status === "cancelled" —
+  // a completely unrelated metric that's usually empty, which is why this
+  // stat always showed 0 even when real emergency alerts existed. The actual
+  // alert data is already fetched into `alerts` (and kept live via the
+  // emergency:alert socket listener above) — just wasn't being used here.
+  const alertCount = alerts.filter((a) => !a.resolved).length;
 
   if (loading) {
     return (
