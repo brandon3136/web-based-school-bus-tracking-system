@@ -14,8 +14,7 @@ const ROLE_PATHS: Record<string, string[]> = {
 // Paths that require authentication (any role)
 const PROTECTED_PREFIXES = ["/dashboard"];
 
-export function middleware(request: NextRequest) {
-  const { pathname } = request.nextUrl;
+export function proxy(request: NextRequest) {  const { pathname } = request.nextUrl;
 
   // Allow public paths
   if (PUBLIC_PATHS.some(p => pathname === p) || pathname.startsWith("/_next") || pathname.startsWith("/favicon")) {
