@@ -1,51 +1,49 @@
-import nodemailer from "nodemailer";
+// Emails are sent via Brevo's HTTP API (not SMTP). Render's free tier blocks
+// all outbound traffic on SMTP ports (25, 465, 587), so nodemailer/SMTP
+// cannot work there. Brevo's API runs over regular HTTPS (port 443), which
+// is not blocked.
 import { randomUUID } from "crypto";
 
-const host = process.env.SMTP_HOST;
-const port = parseInt(process.env.SMTP_PORT || "587", 10);
-const secure = (process.env.SMTP_SECURE || "false").toLowerCase() === "true";
-const user = process.env.SMTP_USER;
-const pass = process.env.SMTP_PASSWORD;
-const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
+const BREVO_API_URL = "https://api.brevo.com/v3/smtp/email";
 
-function getTransporter() {
-  if (!host || !user || !pass) {
-    throw new Error("SMTP configuration is missing. Set SMTP_HOST, SMTP_USER, and SMTP_PASSWORD.");
+const apiKey = process.env.BREVO_API_KEY;
+const senderEmail = process.env.BREVO_SENDER_EMAIL;
+const senderName = process.env.BREVO_SENDER_NAME || "SafeRoute School Bus Tracker";
+
+interface BrevoEmailPayload {
+  sender: { name: string; email: string };
+  to: { email: string; name?: string }[];
+  subject: string;
+  htmlContent: string;
+  textContent: string;
+  headers?: Record<string, string>;
+}
+
+async function sendViaBrevo(payload: BrevoEmailPayload): Promise<void> {
+  if (!apiKey || !senderEmail) {
+    throw new Error("Brevo configuration is missing. Set BREVO_API_KEY and BREVO_SENDER_EMAIL.");
   }
 
-  return nodemailer.createTransport({
-    host,
-    port,
-    secure,
-    auth: { user, pass },
-    tls: {
-      rejectUnauthorized: process.env.SMTP_REJECT_UNAUTHORIZED?.toLowerCase() !== "false",
+  const response = await fetch(BREVO_API_URL, {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/json",
+      "api-key": apiKey,
     },
+    body: JSON.stringify(payload),
   });
+
+  if (!response.ok) {
+    const errorBody = await response.text().catch(() => "");
+    throw new Error(`Brevo API error (${response.status}): ${errorBody}`);
+  }
 }
 
 export async function sendParentCredentialsEmail(parentName: string, parentEmail: string, password: string): Promise<void> {
-  const transporter = getTransporter();
-
-  // Gmail SMTP requires From to match the authenticated user exactly
-  const fromAddress = user!;
   const schoolName = "SafeRoute School Bus Tracker";
 
-  // Mask password: show first 2 and last 2 characters, hide the rest
-  const masked = password.length > 4
-    ? password.slice(0, 2) + "*".repeat(password.length - 4) + password.slice(-2)
-    : "****";
-
-  const message = {
-    from: `${schoolName} <${fromAddress}>`,
-    to: parentEmail,
-    subject: `Your ${schoolName} account is ready`,
-    headers: {
-      "X-Mailer": schoolName,
-      "Message-ID": `<${randomUUID()}@saferoute.school>`,
-      "List-Unsubscribe": `<mailto:${fromAddress}?subject=unsubscribe>`,
-    },
-    text: `Hello ${parentName},
+  const textContent = `Hello ${parentName},
 
 Welcome to the ${schoolName}. A parent account has been created for you so you can track your child's school bus in real time.
 
@@ -58,8 +56,9 @@ To get started, visit your school's login page and sign in with the credentials 
 If you did not expect this email, please contact your school administrator.
 
 Best regards,
-The ${schoolName} team`,
-    html: `
+The ${schoolName} team`;
+
+  const htmlContent = `
 <!DOCTYPE html>
 <html>
 <body style="margin:0; padding:0; font-family: Arial, Helvetica, sans-serif; background-color:#f4f4f4;">
@@ -122,27 +121,25 @@ The ${schoolName} team`,
   </tr>
 </table>
 </body>
-</html>`,
-  };
+</html>`;
 
-  await transporter.sendMail(message);
-}
-
-export async function sendDriverCredentialsEmail(driverName: string, driverEmail: string, password: string): Promise<void> {
-  const transporter = getTransporter();
-  const fromAddress = user!;
-  const schoolName = "SafeRoute School Bus Tracker";
-
-  const message = {
-    from: `${schoolName} <${fromAddress}>`,
-    to: driverEmail,
-    subject: `Your ${schoolName} driver account is ready`,
+  await sendViaBrevo({
+    sender: { name: senderName, email: senderEmail! },
+    to: [{ email: parentEmail, name: parentName }],
+    subject: `Your ${schoolName} account is ready`,
+    htmlContent,
+    textContent,
     headers: {
       "X-Mailer": schoolName,
       "Message-ID": `<${randomUUID()}@saferoute.school>`,
-      "List-Unsubscribe": `<mailto:${fromAddress}?subject=unsubscribe>`,
     },
-    text: `Hello ${driverName},
+  });
+}
+
+export async function sendDriverCredentialsEmail(driverName: string, driverEmail: string, password: string): Promise<void> {
+  const schoolName = "SafeRoute School Bus Tracker";
+
+  const textContent = `Hello ${driverName},
 
 Welcome to the ${schoolName}. A driver account has been created for you so you can manage trips, log GPS positions, and mark student boarding.
 
@@ -155,8 +152,9 @@ To get started, visit your school's login page and select the Driver tab, then s
 If you did not expect this email, please contact your school administrator.
 
 Best regards,
-The ${schoolName} team`,
-    html: `
+The ${schoolName} team`;
+
+  const htmlContent = `
 <!DOCTYPE html>
 <html>
 <body style="margin:0; padding:0; font-family: Arial, Helvetica, sans-serif; background-color:#f4f4f4;">
@@ -212,8 +210,17 @@ The ${schoolName} team`,
   </tr>
 </table>
 </body>
-</html>`,
-  };
+</html>`;
 
-  await transporter.sendMail(message);
+  await sendViaBrevo({
+    sender: { name: senderName, email: senderEmail! },
+    to: [{ email: driverEmail, name: driverName }],
+    subject: `Your ${schoolName} driver account is ready`,
+    htmlContent,
+    textContent,
+    headers: {
+      "X-Mailer": schoolName,
+      "Message-ID": `<${randomUUID()}@saferoute.school>`,
+    },
+  });
 }
