@@ -104,3 +104,14 @@ export async function resolveAlert(req: Request, res: Response): Promise<void> {
     res.status(500).json({ error: "Internal server error" });
   }
 }
+
+export async function getParentAlerts(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const [rows] = await pool.query(`
+      SELECT DISTINCT ea.id, ea.message, ea.created_at, ea.resolved, b.plate_number, u.name AS driver_name,
+        'Emergency Alert' AS title
+      FROM emergency_alerts ea JOIN students s ON s.bus_id = ea.bus_id JOIN buses b ON b.id = ea.bus_id
+      JOIN users u ON u.id = ea.driver_id WHERE s.parent_id = ? ORDER BY ea.created_at DESC LIMIT 100`, [req.user!.userId]);
+    res.json(rows);
+  } catch (err) { console.error(err); res.status(500).json({ error: "Internal server error" }); }
+}

@@ -2,7 +2,7 @@ import { Router } from "express";
 import { authenticate, authorize } from "../middleware/auth";
 import { getBoardingList, markBoarded, markAlighted, getStudentsForBus } from "../controllers/boardingController";
 import { getAllStudents, getMyStudents, getStudentOptions, createStudent, updateStudent, deleteStudent, registerStudentsWithParent } from "../controllers/studentController";
-import { sendEmergencyAlert, getAlerts, resolveAlert } from "../controllers/alertController";
+import { sendEmergencyAlert, getAlerts, resolveAlert, getParentAlerts } from "../controllers/alertController";
 import { subscribe, unsubscribe, getVapidPublicKey } from "../controllers/pushController";
 
 const router = Router();
@@ -30,6 +30,7 @@ router.delete("/students/:id",           authorize("admin"),           deleteStu
 // ── Emergency Alerts ──────────────────────────
 router.post("/alerts/emergency",         authorize("driver"),          sendEmergencyAlert);
 router.get( "/alerts",                   authorize("admin"),           getAlerts);
+router.get( "/alerts/mine",              authorize("parent"),          getParentAlerts);
 router.patch("/alerts/:id/resolve",      authorize("admin"),           resolveAlert);
 
 // ── Web Push ──────────────────────────────────

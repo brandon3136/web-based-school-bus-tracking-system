@@ -58,6 +58,9 @@ export default function ParentDashboard() {
   const [eta, setEta] = useState<number | null>(null);
   const [gpsLive, setGpsLive] = useState(false);
   const [emergencyBanner, setEmergencyBanner] = useState<{ message: string; timestamp: string } | null>(null);
+  const [todayAlerts, setTodayAlerts] = useState<Array<{ id: number; title: string; message: string; created_at: string; plate_number?: string }>>([]);
+
+  useEffect(() => { apiFetch("/api/alerts/mine").then(r => r.ok ? r.json() : []).then((rows) => setTodayAlerts(rows.filter((a: { created_at: string }) => new Date(a.created_at).toDateString() === new Date().toDateString()))).catch(() => {}); }, []);
 
   // Socket.io connection for real-time GPS
   const { connected: socketConnected, subscribeBus, unsubscribeBus, onGpsUpdate, onEmergencyAlert } = useSocket();

@@ -185,3 +185,14 @@ export async function getActiveTrips(_req: Request, res: Response): Promise<void
     res.status(500).json({ error: "Internal server error" });
   }
 }
+
+export async function getParentTripHistory(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const [rows] = await pool.query(`
+      SELECT DISTINCT t.id, t.status, t.started_at, t.ended_at, b.plate_number, r.name AS route_name, u.name AS driver_name
+      FROM trips t JOIN students s ON s.bus_id = t.bus_id JOIN buses b ON b.id = t.bus_id
+      LEFT JOIN routes r ON r.id = t.route_id JOIN users u ON u.id = t.driver_id
+      WHERE s.parent_id = ? ORDER BY t.started_at DESC LIMIT 100`, [req.user!.userId]);
+    res.json(rows);
+  } catch (err) { console.error(err); res.status(500).json({ error: "Internal server error" }); }
+}
