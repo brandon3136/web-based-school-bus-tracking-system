@@ -1,63 +1,31 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-// Routes that don't require authentication
-const PUBLIC_PATHS = ["/", "/login", "/unauthorized"];
+// NOTE: Route protection can NOT be done here.
+//
+// The frontend (vercel.app) and backend (onrender.com) are different domains.
+// saferoute_token / saferoute_role cookies are set by the BACKEND's Set-Cookie
+// header, so they are scoped to onrender.com only — the browser never attaches
+// them to requests made to this Next.js server (vercel.app). request.cookies.get()
+// here will always return undefined, which previously caused every visit to
+// /dashboard/* to redirect back to /login even when the user was authenticated.
+//
+// Auth/role protection instead happens:
+//   1. Client-side: dashboard pages call the backend via apiFetch() (lib/api.ts),
+//      which sends the cookie correctly (same domain as the cookie) and redirects
+//      to /login on a 401 response.
+//   2. Server-side (source of truth): every protected backend route is wrapped
+//      with `authenticate` / `authorize(...)` middleware in the Express API.
+//
+// If you later move both frontend and backend under one parent domain (e.g.
+// app.example.com + api.example.com) you can set Domain=.example.com on the
+// cookies and restore a cookie check here.
 
-// Role-based route mapping: which dashboard paths each role can access
-const ROLE_PATHS: Record<string, string[]> = {
-  admin: ["/dashboard/admin"],
-  parent: ["/dashboard/parent"],
-  driver: ["/dashboard/driver"],
-};
-
-// Paths that require authentication (any role)
-const PROTECTED_PREFIXES = ["/dashboard"];
-
-export function proxy(request: NextRequest) {  const { pathname } = request.nextUrl;
-
-  // Allow public paths
-  if (PUBLIC_PATHS.some(p => pathname === p) || pathname.startsWith("/_next") || pathname.startsWith("/favicon")) {
-    return NextResponse.next();
-  }
-
-  // Check if this is a protected route
-  const isProtected = PROTECTED_PREFIXES.some(prefix => pathname.startsWith(prefix));
-  if (!isProtected) {
-    return NextResponse.next();
-  }
-
-  // Check for auth token cookie (HTTP-only, but middleware can read it)
-  const token = request.cookies.get("saferoute_token")?.value;
-  if (!token) {
-    // Not authenticated — redirect to login with the original URL as redirect param
-    const loginUrl = new URL("/login", request.url);
-    loginUrl.searchParams.set("redirect", pathname);
-    return NextResponse.redirect(loginUrl);
-  }
-
-  // Check role-based access
-  const role = request.cookies.get("saferoute_role")?.value;
-  if (!role) {
-    // Token exists but no role cookie — redirect to login
-    const loginUrl = new URL("/login", request.url);
-    loginUrl.searchParams.set("redirect", pathname);
-    return NextResponse.redirect(loginUrl);
-  }
-
-  // Verify the user's role has access to this path
-  const allowedPrefixes = ROLE_PATHS[role] || [];
-  const hasAccess = allowedPrefixes.some(prefix => pathname.startsWith(prefix));
-
-  if (!hasAccess) {
-    // Role doesn't have access to this route — redirect to unauthorized
-    return NextResponse.redirect(new URL("/unauthorized", request.url));
-  }
-
+export function proxy(_request: NextRequest) {
   return NextResponse.next();
 }
 
 export const config = {
-  // Only run middleware on page routes, not on static assets or API routes
+  // Only run on page routes, not static assets or API routes
   matcher: ["/((?!_next/static|_next/image|favicon.ico|api).*)"],
 };
