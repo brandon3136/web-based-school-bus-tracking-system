@@ -16,7 +16,6 @@ const NAV = [
   { href: "/dashboard/parent", label: "Live Tracking", icon: MapPin },
   { href: "/dashboard/parent/alerts", label: "Alerts", icon: Bell },
   { href: "/dashboard/parent/history", label: "Trip History", icon: Clock },
-  { href: "/dashboard/parent/history", label: "Trip History", icon: Clock },
   { href: "/dashboard/parent/settings", label: "Settings", icon: Settings },
 ];
 
