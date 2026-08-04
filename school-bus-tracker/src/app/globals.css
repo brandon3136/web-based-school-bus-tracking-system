@@ -1,0 +1,104 @@
+@import "tailwindcss";
+@import "leaflet/dist/leaflet.css";
+
+:root {
+  --bus-yellow: #F5A623;
+  --bus-yellow-light: #FFF3DC;
+  --navy: #0F2B5B;
+  --navy-mid: #1A3F7A;
+  --teal: #0D9488;
+  --teal-light: #CCFBF1;
+  --danger: #DC2626;
+  --danger-light: #FEE2E2;
+  --slate: #64748B;
+  --surface: #F8FAFC;
+  --card: #FFFFFF;
+  --white: #FFFFFF;
+  --border: #E2E8F0;
+  --text-primary: #0F172A;
+  --text-secondary: #475569;
+  --input-bg: #FFFFFF;
+  --shadow: rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="dark"] {
+  --bus-yellow: #F5A623;
+  --bus-yellow-light: rgba(245, 166, 35, 0.15);
+  --navy: #6B9FE8;
+  --navy-mid: #5B8BD6;
+  --teal: #2DD4BF;
+  --teal-light: rgba(45, 212, 191, 0.15);
+  --danger: #F87171;
+  --danger-light: rgba(248, 113, 113, 0.15);
+  --slate: #94A3B8;
+  --surface: #0F172A;
+  --card: #1E293B;
+  --white: #1E293B;
+  --border: #334155;
+  --text-primary: #F1F5F9;
+  --text-secondary: #CBD5E1;
+  --input-bg: #1E293B;
+  --shadow: rgba(0, 0, 0, 0.3);
+}
+
+body {
+  background: var(--surface);
+  color: var(--text-primary);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Smooth theme transitions for all elements */
+*,
+*::before,
+*::after {
+  transition-property: background-color, border-color, color, box-shadow, opacity;
+  transition-duration: 0.3s;
+  transition-timing-function: ease;
+}
+
+/* Exclude transitions from elements that shouldn't animate */
+input:focus,
+textarea:focus,
+select:focus,
+a:hover,
+button:active {
+  transition-duration: 0.15s;
+}
+
+/* Don't transition the map tiles */
+.leaflet-tile,
+.leaflet-tile-container {
+  transition: none !important;
+}
+
+/* Leaflet map resets */
+.leaflet-container {
+  width: 100%;
+  height: 100%;
+  border-radius: 12px;
+  z-index: 0;
+}
+
+/* Dark mode overrides — must be in @layer utilities to override Tailwind v4 cascade */
+@layer utilities {
+  [data-theme="dark"] .bg-white {
+    background-color: var(--card) !important;
+  }
+  [data-theme="dark"] .hover\:bg-slate-50:hover {
+    background-color: rgba(148, 163, 184, 0.1) !important;
+  }
+  [data-theme="dark"] .hover\:bg-red-50:hover {
+    background-color: rgba(248, 113, 113, 0.1) !important;
+  }
+  [data-theme="dark"] .hover\:bg-teal-100:hover {
+    background-color: rgba(45, 212, 191, 0.15) !important;
+  }
+  [data-theme="dark"] input,
+  [data-theme="dark"] select,
+  [data-theme="dark"] textarea {
+    background-color: var(--input-bg) !important;
+    color: var(--text-primary) !important;
+    border-color: var(--border) !important;
+  }
+}
