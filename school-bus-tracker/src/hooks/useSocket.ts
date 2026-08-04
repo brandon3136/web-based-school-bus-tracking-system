@@ -49,7 +49,16 @@ export function useSocket(options: UseSocketOptions = {}): UseSocketReturn {
   useEffect(() => {
     if (!autoConnect || typeof window === "undefined") return;
 
+    // Cookies are the primary auth path (see socketServer.ts), but on some
+    // browsers/networks cross-domain cookies (Vercel <-> Render) get blocked
+    // even with SameSite=None (e.g. Safari ITP, private browsing, some mobile
+    // browsers). Passing the JWT explicitly here mirrors what apiFetch already
+    // does for regular HTTP requests, so the socket doesn't silently fail to
+    // authenticate in those cases.
+    const token = typeof window !== "undefined" ? localStorage.getItem("saferoute_token") : null;
+
     const socket = io(SOCKET_URL, {
+      auth: { token },
       withCredentials: true,
       transports: ["websocket", "polling"],
       reconnection: true,

@@ -55,9 +55,10 @@ export default function ParentDashboard() {
   const [busPos, setBusPos] = useState<{ lat: number; lng: number } | null>(null);
   const [eta, setEta] = useState<number | null>(null);
   const [gpsLive, setGpsLive] = useState(false);
+  const [emergencyBanner, setEmergencyBanner] = useState<{ message: string; timestamp: string } | null>(null);
 
   // Socket.io connection for real-time GPS
-  const { connected: socketConnected, subscribeBus, unsubscribeBus, onGpsUpdate } = useSocket();
+  const { connected: socketConnected, subscribeBus, unsubscribeBus, onGpsUpdate, onEmergencyAlert } = useSocket();
 
   // Subscribe to bus room and listen for GPS updates
   useEffect(() => {
@@ -78,6 +79,18 @@ export default function ParentDashboard() {
       unsubscribeBus(busId);
     };
   }, [selectedIdx, students, subscribeBus, unsubscribeBus, onGpsUpdate]);
+
+  // Listen for real-time emergency alerts. These arrive on this parent's own
+  // socket room (server-side scoped to their children's buses), independent
+  // of which student/bus is currently selected in the UI.
+  useEffect(() => {
+    onEmergencyAlert((data) => {
+      setEmergencyBanner({
+        message: data.message || "An emergency has been reported on your child's bus.",
+        timestamp: data.timestamp,
+      });
+    });
+  }, [onEmergencyAlert]);
 
   useEffect(() => {
         const userStr = localStorage.getItem("saferoute_user");
@@ -197,6 +210,29 @@ if (userStr) {
       <Sidebar role="parent" items={NAV} accentColor="#0D9488" userName={parentName} />
 
       <main className="flex-1 p-6 md:p-8">
+        {/* Real-time emergency alert banner */}
+        {emergencyBanner && (
+          <div
+            className="mb-6 flex items-start gap-3 rounded-xl px-4 py-3 border"
+            style={{ backgroundColor: "var(--danger-light)", borderColor: "var(--danger)" }}
+            role="alert"
+          >
+            <AlertTriangle size={20} style={{ color: "var(--danger)" }} className="mt-0.5 shrink-0" />
+            <div className="flex-1">
+              <p className="text-sm font-semibold" style={{ color: "var(--danger)" }}>Emergency Alert</p>
+              <p className="text-sm mt-0.5" style={{ color: "var(--danger)" }}>{emergencyBanner.message}</p>
+            </div>
+            <button
+              onClick={() => setEmergencyBanner(null)}
+              className="text-xs font-medium shrink-0"
+              style={{ color: "var(--danger)" }}
+              aria-label="Dismiss alert"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+
         {/* Header */}
         <div className="mb-6 flex items-start justify-between flex-wrap gap-4">
           <div>
