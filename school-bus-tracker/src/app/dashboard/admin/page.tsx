@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from "react";
 import Sidebar from "@/components/Sidebar";
 import StatCard from "@/components/StatCard";
 import { apiFetch } from "@/lib/api";
-import { useSocket, GpsUpdate } from "@/hooks/useSocket";
+import { useSocket, GpsUpdate, EmergencyAlert } from "@/hooks/useSocket";
 import {
   LayoutDashboard,
   Bus,
@@ -51,6 +51,8 @@ interface ActiveTrip {
   started_at: string;
 }
 
+interface AlertRecord { id: number; resolved: boolean | number; }
+
 interface HistoryTrip {
   id: number;
   driver_name: string;
@@ -66,6 +68,7 @@ export default function AdminDashboard() {
   const [buses, setBuses] = useState<BusRecord[]>([]);
   const [activeTrips, setActiveTrips] = useState<ActiveTrip[]>([]);
   const [historyTrips, setHistoryTrips] = useState<HistoryTrip[]>([]);
+  const [alerts, setAlerts] = useState<AlertRecord[]>([]);
   const [studentCount, setStudentCount] = useState(0);
   const [driverCount, setDriverCount] = useState(0);
   const [selectedBusId, setSelectedBusId] = useState<number | null>(null);
@@ -80,6 +83,7 @@ export default function AdminDashboard() {
     unsubscribeBus,
     onGpsUpdate,
     offGpsUpdate,
+    onEmergencyAlert,
   } = useSocket();
 
   // Fetch all data
@@ -97,15 +101,19 @@ export default function AdminDashboard() {
       apiFetch("/api/students")
         .then((r) => (r.ok ? r.json() : []))
         .catch(() => []),
+      apiFetch("/api/alerts")
+        .then((r) => (r.ok ? r.json() : []))
+        .catch(() => []),
       apiFetch("/api/drivers")
         .then((r) => (r.ok ? r.json() : []))
         .catch(() => []),
     ])
-      .then(([busData, activeData, historyData, studentData, driverData]) => {
+      .then(([busData, activeData, historyData, studentData, alertData, driverData]) => {
         setBuses(Array.isArray(busData) ? busData : []);
         setActiveTrips(Array.isArray(activeData) ? activeData : []);
         setHistoryTrips(Array.isArray(historyData) ? historyData : []);
         setStudentCount(Array.isArray(studentData) ? studentData.length : 0);
+        setAlerts(Array.isArray(alertData) ? alertData : []);
         setDriverCount(Array.isArray(driverData) ? driverData.length : 0);
         if (Array.isArray(busData) && busData.length > 0) {
           setSelectedBusId(busData[0].id);
@@ -160,6 +168,12 @@ export default function AdminDashboard() {
       }
     };
   }, [selectedBusId, subscribeBus, unsubscribeBus, onGpsUpdate, offGpsUpdate]);
+
+  useEffect(() => {
+    onEmergencyAlert((alert: EmergencyAlert) => {
+      setAlerts((current) => current.some((item) => item.id === alert.alertId) ? current : [{ id: alert.alertId, resolved: false }, ...current]);
+    });
+  }, [onEmergencyAlert]);
 
   // Active trip IDs for highlighting
   const activeBusIds = useMemo(
@@ -315,7 +329,7 @@ export default function AdminDashboard() {
             value={alertCount}
             icon={AlertTriangle}
             color="#DC2626"
-            sub={alertCount === 0 ? "All clear" : "Cancelled trips"}
+            sub={alertCount === 0 ? "All clear" : "Open emergency alerts"}
           />
         </div>
 

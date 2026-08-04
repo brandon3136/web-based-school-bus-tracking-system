@@ -3,7 +3,7 @@ import pool from "../config/db";
 import { AuthRequest } from "../middleware/auth";
 import { getIo } from "../socket/socketServer";
 import { checkGeofences, clearTripGeofences } from "../services/geofenceService";
-import { sendPushToParent } from "../services/pushService";
+import { sendPushToAdmins, sendPushToParent } from "../services/pushService";
 import { GpsUpdatePayload } from "../types";
 
 export async function startTrip(req: AuthRequest, res: Response): Promise<void> {

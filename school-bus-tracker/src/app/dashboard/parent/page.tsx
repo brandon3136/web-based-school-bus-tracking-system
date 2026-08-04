@@ -7,6 +7,7 @@ import StatCard from "@/components/StatCard";
 import { MapPin, Bell, Clock, Bus, Home, Settings, GraduationCap, AlertTriangle, Radio } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { useSocket, GpsUpdate } from "@/hooks/useSocket";
+import { usePushNotification } from "@/hooks/usePushNotification";
 
 const BusMap = dynamic(() => import("@/components/BusMap"), { ssr: false });
 
@@ -45,6 +46,7 @@ interface RouteStop {
 
 export default function ParentDashboard() {
   const router = useRouter();
+  const push = usePushNotification();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [students, setStudents] = useState<Student[]>([]);
@@ -243,6 +245,12 @@ if (userStr) {
             </p>
           </div>
 
+          <div className="rounded-xl border px-3 py-2" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+            <p className="text-xs font-medium" style={{ color: "var(--text-primary)" }}>Push notifications</p>
+            {!push.isSupported ? <p className="text-xs" style={{ color: "var(--slate)" }}>Not supported by this browser</p> : <button type="button" onClick={push.isSubscribed ? push.unsubscribe : push.subscribe} disabled={push.isLoading} className="mt-1 text-xs font-semibold disabled:opacity-60" style={{ color: "var(--teal)" }}>{push.isLoading ? "Updating…" : push.isSubscribed ? "Disable notifications" : "Enable push notifications"}</button>}
+            {push.error && <p role="status" className="mt-1 text-xs" style={{ color: "var(--danger)" }}>{push.error}</p>}
+            {push.isSubscribed && <p role="status" className="mt-1 text-xs" style={{ color: "var(--teal)" }}>Enabled for this device</p>}
+          </div>
           {/* Student selector (if multiple children) */}
           {students.length > 1 && (
             <select
