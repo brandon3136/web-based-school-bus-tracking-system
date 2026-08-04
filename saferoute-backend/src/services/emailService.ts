@@ -9,6 +9,7 @@ const BREVO_API_URL = "https://api.brevo.com/v3/smtp/email";
 const apiKey = process.env.BREVO_API_KEY;
 const senderEmail = process.env.BREVO_SENDER_EMAIL;
 const senderName = process.env.BREVO_SENDER_NAME || "SafeRoute School Bus Tracker";
+const frontendUrl = process.env.FRONTEND_URL || "https://web-based-school-bus-tracking-syste.vercel.app";
 
 interface BrevoEmailPayload {
   sender: { name: string; email: string };
@@ -42,6 +43,7 @@ async function sendViaBrevo(payload: BrevoEmailPayload): Promise<void> {
 
 export async function sendParentCredentialsEmail(parentName: string, parentEmail: string, password: string): Promise<void> {
   const schoolName = "SafeRoute School Bus Tracker";
+  const loginUrl = `${frontendUrl}/login?role=parent`;
 
   const textContent = `Hello ${parentName},
 
@@ -51,7 +53,9 @@ Your login credentials:
   Username: ${parentEmail}
   Temporary password: ${password}
 
-To get started, visit your school's login page and sign in with the credentials above. You will be asked to set a new password on your first login.
+Sign in here: ${loginUrl}
+
+You will be asked to set a new password on your first login.
 
 If you did not expect this email, please contact your school administrator.
 
@@ -100,8 +104,18 @@ The ${schoolName} team`;
             </table>
 
             <p style="margin:0 0 12px; font-size:14px; color:#333333; line-height:1.6;">
-              To get started, visit your school's login page and sign in with the credentials above. You will be asked to set a new password on your first login.
+              Click the button below to sign in with the credentials above. You will be asked to set a new password on your first login.
             </p>
+
+            <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 24px;">
+              <tr>
+                <td style="border-radius:8px; background-color:#0D9488;">
+                  <a href="${loginUrl}" target="_blank" style="display:inline-block; padding:12px 28px; font-size:14px; font-weight:600; color:#ffffff; text-decoration:none;">
+                    Sign in to SafeRoute
+                  </a>
+                </td>
+              </tr>
+            </table>
 
             <p style="margin:0 0 8px; font-size:13px; color:#94a3b8;">
               If you did not expect this email, please contact your school administrator.
@@ -138,6 +152,7 @@ The ${schoolName} team`;
 
 export async function sendDriverCredentialsEmail(driverName: string, driverEmail: string, password: string): Promise<void> {
   const schoolName = "SafeRoute School Bus Tracker";
+  const loginUrl = `${frontendUrl}/login?role=driver`;
 
   const textContent = `Hello ${driverName},
 
@@ -147,7 +162,9 @@ Your login credentials:
   Username: ${driverEmail}
   Temporary password: ${password}
 
-To get started, visit your school's login page and select the Driver tab, then sign in with the credentials above. You will be asked to set a new password on your first login.
+Sign in here: ${loginUrl}
+
+You will be asked to set a new password on your first login.
 
 If you did not expect this email, please contact your school administrator.
 
@@ -191,8 +208,19 @@ The ${schoolName} team`;
               </tr>
             </table>
             <p style="margin:0 0 12px; font-size:14px; color:#333333; line-height:1.6;">
-              To get started, visit your school's login page and select the <strong>Driver</strong> tab, then sign in with the credentials above. You will be asked to set a new password on your first login.
+              Click the button below and select the <strong>Driver</strong> tab to sign in with the credentials above. You will be asked to set a new password on your first login.
             </p>
+
+            <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 24px;">
+              <tr>
+                <td style="border-radius:8px; background-color:#F5A623;">
+                  <a href="${loginUrl}" target="_blank" style="display:inline-block; padding:12px 28px; font-size:14px; font-weight:600; color:#0F2B5B; text-decoration:none;">
+                    Sign in to SafeRoute
+                  </a>
+                </td>
+              </tr>
+            </table>
+
             <p style="margin:0 0 8px; font-size:13px; color:#94a3b8;">
               If you did not expect this email, please contact your school administrator.
             </p>
