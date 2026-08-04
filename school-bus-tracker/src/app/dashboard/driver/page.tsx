@@ -470,13 +470,13 @@ export default function DriverDashboard() {
               <div className="flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: tripActive ? "#F5A623" : "var(--slate)" }} />
                 <p className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>
-                  {tripActive ? "Your live position" : "Route preview"}
+                  {tripActive ? (gpsPosition ? "Your live position" : "Waiting for GPS signal") : "Waiting for trip to start"}
                 </p>
               </div>
               {bus && <span className="text-xs" style={{ color: "var(--slate)" }}>{bus.plate_number}</span>}
             </div>
             <div style={{ height: "335px" }}>
-              <BusMap busPosition={mapPosition} stops={mapStops} routeCoords={routeCoords} height="335px" />
+              {mapPosition ? <BusMap busPosition={mapPosition} stops={mapStops} routeCoords={routeCoords} height="335px" /> : <div className="flex h-full items-center justify-center text-center"><div><MapPin size={30} className="mx-auto mb-3 opacity-30" style={{ color: "var(--slate)" }} /><p className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>{tripActive ? "Waiting for live GPS location" : "Waiting for trip to start"}</p><p className="mt-1 text-xs" style={{ color: "var(--slate)" }}>{tripActive ? "Your position will appear when GPS is available." : "Start your trip to begin live tracking."}</p></div></div>}
             </div>
           </div>
 
