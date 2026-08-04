@@ -94,6 +94,17 @@ export default function ParentDashboard() {
         message: data.message || "An emergency has been reported on your child's bus.",
         timestamp: data.timestamp,
       });
+      // Also drop it straight into "Today's Alerts" so the list updates live
+      // instead of only appearing after a page refresh.
+      setTodayAlerts((prev) => [
+        {
+          id: data.alertId,
+          title: "Emergency Alert",
+          message: data.message || "An emergency has been reported on your child's bus.",
+          created_at: data.timestamp,
+        },
+        ...prev,
+      ]);
     });
   }, [onEmergencyAlert]);
 
@@ -367,10 +378,32 @@ if (userStr) {
         {/* Recent alerts */}
         <div className="mt-6 bg-white rounded-2xl border p-5" style={{ borderColor: "var(--border)" }}>
           <h2 className="font-semibold text-sm mb-4" style={{ color: "var(--text-primary)" }}>Today's Alerts</h2>
-          <div className="text-center py-6">
-            <Bell size={24} className="mx-auto mb-2 opacity-30" style={{ color: "var(--slate)" }} />
-            <p className="text-sm" style={{ color: "var(--slate)" }}>No alerts today.</p>
-          </div>
+          {todayAlerts.length === 0 ? (
+            <div className="text-center py-6">
+              <Bell size={24} className="mx-auto mb-2 opacity-30" style={{ color: "var(--slate)" }} />
+              <p className="text-sm" style={{ color: "var(--slate)" }}>No alerts today.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {todayAlerts.map((a) => (
+                <article
+                  key={a.id}
+                  className="flex items-start gap-3 rounded-xl border p-3"
+                  style={{ borderColor: "var(--border)" }}
+                >
+                  <AlertTriangle size={16} className="mt-0.5 shrink-0" style={{ color: "var(--danger)" }} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>{a.title}</p>
+                    <p className="text-sm mt-0.5" style={{ color: "var(--text-secondary)" }}>{a.message}</p>
+                    <p className="mt-1.5 text-xs" style={{ color: "var(--slate)" }}>
+                      {new Date(a.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                      {a.plate_number ? ` · ${a.plate_number}` : ""}
+                    </p>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
         </div>
       </main>
     </div>
