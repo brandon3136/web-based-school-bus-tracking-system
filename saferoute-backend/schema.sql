@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS users (
   role        ENUM('parent', 'admin', 'driver') NOT NULL,
   phone       VARCHAR(20),
   is_active   BOOLEAN DEFAULT TRUE,
+  must_change_password BOOLEAN DEFAULT FALSE,
   created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX idx_email (email),
