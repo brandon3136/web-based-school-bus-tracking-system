@@ -2,7 +2,7 @@ import { Request, Response } from "express";
 import pool from "../config/db";
 import { AuthRequest } from "../middleware/auth";
 import { getIo } from "../socket/socketServer";
-import { sendPushToAdmins } from "../services/pushService";
+import { sendPushToAdmins, sendPushToParent } from "../services/pushService";
 import { EmergencyAlertPayload } from "../types";
 
 export async function sendEmergencyAlert(req: AuthRequest, res: Response): Promise<void> {
@@ -44,6 +44,28 @@ export async function sendEmergencyAlert(req: AuthRequest, res: Response): Promi
       body:  `Driver ${driverName} (Bus ${bus_id}) has reported an emergency.`,
       data:  payload,
     });
+
+    // Notify parents of every active student on this bus — they need to know
+    // about an emergency involving their child's bus at least as urgently as admins do.
+    const [parentRows] = await pool.query(
+      `SELECT DISTINCT s.parent_id
+       FROM students s
+       WHERE s.bus_id = ? AND s.is_active = TRUE`,
+      [bus_id]
+    );
+    const parents = parentRows as Array<{ parent_id: number }>;
+
+    for (const parent of parents) {
+      // Real-time in-app event
+      getIo().to(`parent:${parent.parent_id}`).emit("emergency:alert", payload);
+
+      // Web Push notification
+      await sendPushToParent(parent.parent_id, {
+        title: "🚨 Emergency Alert",
+        body:  `An emergency has been reported on your child's bus. ${message || "Please check the app for details."}`,
+        data:  payload,
+      });
+    }
 
     res.status(201).json({ alertId, message: "Emergency alert sent" });
   } catch (err) {
