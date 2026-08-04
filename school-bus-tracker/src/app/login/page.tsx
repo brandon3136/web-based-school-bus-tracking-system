@@ -63,7 +63,12 @@ function LoginForm() {
         return;
       }
 
-      // Store user info in localStorage for display purposes (token is in cookie)
+      // Store token + user info in localStorage. The httpOnly cookie also
+      // carries the token, but since the frontend (Vercel) and backend
+      // (Render) live on different domains, we can't rely on the cookie
+      // alone — storing the token lets apiFetch attach it as a Bearer
+      // header on every request.
+      localStorage.setItem("saferoute_token", data.token);
       localStorage.setItem("saferoute_user", JSON.stringify(data.user));
 
       // Redirect to the originally requested page, or default to dashboard
