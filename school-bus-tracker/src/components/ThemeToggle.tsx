@@ -1,4 +1,5 @@
 "use client";
+import type { CSSProperties } from "react";
 import { useTheme } from "@/hooks/useTheme";
 import { Sun, Moon } from "lucide-react";
 
@@ -25,8 +26,8 @@ export default function ThemeToggle() {
       className="relative w-14 h-7 rounded-full transition-colors duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2"
       style={{
         backgroundColor: isDark ? "#334155" : "#E2E8F0",
-        focusRingColor: isDark ? "#6B9FE8" : "#0F2B5B",
-      }}
+        ["--tw-ring-color" as string]: isDark ? "#6B9FE8" : "#0F2B5B",
+      } as CSSProperties}
       aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
       title={isDark ? "Switch to light mode" : "Switch to dark mode"}
     >

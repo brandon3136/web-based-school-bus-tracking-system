@@ -63,18 +63,19 @@ export default function ParentDashboard() {
   useEffect(() => {
     const student = students[selectedIdx];
     if (!student?.bus_id) return;
+    const busId = student.bus_id;
 
-    subscribeBus(student.bus_id);
+    subscribeBus(busId);
 
     onGpsUpdate((data: GpsUpdate) => {
-      if (data.busId === student.bus_id) {
+      if (data.busId === busId) {
         setBusPos({ lat: data.latitude, lng: data.longitude });
         setGpsLive(true);
       }
     });
 
     return () => {
-      unsubscribeBus(student.bus_id);
+      unsubscribeBus(busId);
     };
   }, [selectedIdx, students, subscribeBus, unsubscribeBus, onGpsUpdate]);
 

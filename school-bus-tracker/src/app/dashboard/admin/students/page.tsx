@@ -151,8 +151,7 @@ export default function AdminStudentsPage() {
   // Success notification state
   const [successMessage, setSuccessMessage] = useState("");
 
-  async function loadStudents(token: string, preferredSelectedId?: number) {
-    try {
+async function loadStudents(preferredSelectedId?: number) {    try {
       const response = await apiFetch("/api/students", {
         headers: {},
       });

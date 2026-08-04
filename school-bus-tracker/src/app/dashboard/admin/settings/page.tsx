@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { apiFetch, apiLogout } from "@/lib/api";
 
+const API_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:4000";
 
 const NAV = [
   { href: "/dashboard/admin", label: "Dashboard", icon: LayoutDashboard },
