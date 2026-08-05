@@ -1,583 +1,700 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import Sidebar from "@/components/Sidebar";
 import StatCard from "@/components/StatCard";
 import {
-  AlertTriangle, Bus, CheckCircle2, LayoutDashboard, MapPin,
-  MoreHorizontal, Phone, Plus, Search, Settings, Trash2,
-  Users, X, UserPlus, Mail, Clock, Pencil, ShieldCheck, Truck,
+  MapPin, Users, AlertTriangle, CheckCircle2,
+  Home, Clock, Bus, Route,
+  Play, Square, Radio, KeyRound,
 } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 
+const BusMap = dynamic(() => import("@/components/BusMap"), { ssr: false });
+
 
 const NAV = [
-  { href: "/dashboard/admin", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/dashboard/admin/fleet", label: "Fleet", icon: Bus },
-  { href: "/dashboard/admin/routes", label: "Routes & Stops", icon: MapPin },
-  { href: "/dashboard/admin/students", label: "Students", icon: Users },
-  { href: "/dashboard/admin/drivers", label: "Drivers", icon: Truck },
-  { href: "/dashboard/admin/history", label: "GPS Logs", icon: Clock },
-  { href: "/dashboard/admin/settings", label: "Settings", icon: Settings },
+  { href: "/dashboard/driver", label: "My Trip", icon: MapPin },
+  { href: "/dashboard/driver/students", label: "Student List", icon: Users },
+  { href: "/dashboard/driver/history", label: "Trip History", icon: Clock },
+  { href: "/dashboard/driver/settings", label: "Settings", icon: KeyRound },
 ];
 
-interface Driver {
+interface BusInfo {
   id: number;
-  name: string;
-  email: string;
-  phone: string | null;
-  bus_id: number | null;
-  bus_plate: string | null;
-  bus_model: string | null;
+  plate_number: string;
+  model: string | null;
+  capacity: number;
+  route_id: number | null;
   route_name: string | null;
-  total_trips: number;
-  completed_trips: number;
-  active_trips: number;
-  last_trip_date: string | null;
-  created_at: string;
+  traccar_device_id: string | null;
 }
 
-export default function DriversPage() {
-  const [drivers, setDrivers] = useState<Driver[]>([]);
+interface StudentRecord {
+  id: number;
+  name: string;
+  grade: string | null;
+  stop_name: string | null;
+  stop_id: number | null;
+  parent_name: string;
+  parent_phone: string | null;
+}
+
+interface RouteStop {
+  id: number;
+  name: string;
+  latitude: number | string;
+  longitude: number | string;
+  stop_order: number;
+}
+
+export default function DriverDashboard() {
   const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState("");
-  const [searchTerm, setSearchTerm] = useState("");
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [error, setError] = useState("");
 
-  // Modals
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<Driver | null>(null);
-  const [deleteSaving, setDeleteSaving] = useState(false);
-  const [deleteError, setDeleteError] = useState("");
+  // Driver info
+  const [driverName, setDriverName] = useState("Driver");
 
-  // Row action menu
-  const [openMenuId, setOpenMenuId] = useState<number | null>(null);
-  const [menuPosition, setMenuPosition] = useState<{ top: number; right: number } | null>(null);
+  // Bus data
+  const [bus, setBus] = useState<BusInfo | null>(null);
+  const [students, setStudents] = useState<StudentRecord[]>([]);
+  const [routeStops, setRouteStops] = useState<RouteStop[]>([]);
 
-  // Add driver form
-  const [addForm, setAddForm] = useState({ name: "", email: "", phone: "" });
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState("");
-  const [successMessage, setSuccessMessage] = useState("");
+  // Trip state
+  const [tripId, setTripId] = useState<number | null>(null);
+  const [tripActive, setTripActive] = useState(false);
+  const [tripLoading, setTripLoading] = useState(false);
+  const [tripError, setTripError] = useState("");
+  const [tripStartedAt, setTripStartedAt] = useState<string | null>(null);
 
-  async function loadDrivers() {
-    try {
-      const res = await apiFetch("/api/drivers", {
-        headers: {},
-      });
-      const data = await res.json().catch(() => null);
-      if (!res.ok || !Array.isArray(data)) {
-        setLoadError(data?.error || "Could not load drivers.");
-        return;
-      }
-      setDrivers(data);
-      if (data.length > 0 && !data.find((d: Driver) => d.id === selectedId)) {
-        setSelectedId(data[0].id);
-      }
-    } catch {
-      setLoadError("Could not connect to the server.");
-    }
-  }
+  // Boarding state
+  const [boardedIds, setBoardedIds] = useState<Set<number>>(new Set());
+  const [boardingLoading, setBoardingLoading] = useState<number | null>(null);
 
+  // Emergency
+  const [emergencySent, setEmergencySent] = useState(false);
+  const [emergencyLoading, setEmergencyLoading] = useState(false);
+
+  // Success message
+  const [successMsg, setSuccessMsg] = useState("");
+
+  // GPS tracking state
+  const [gpsPosition, setGpsPosition] = useState<{ lat: number; lng: number } | null>(null);
+  const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null);
+  const [gpsTracking, setGpsTracking] = useState(false);
+  const [gpsError, setGpsError] = useState("");
+  const [gpsSpeed, setGpsSpeed] = useState(0);
+  const [lastGpsSent, setLastGpsSent] = useState(0);
+  const watchIdRef = useRef<number | null>(null);
+  const tripIdRef = useRef<number | null>(null);
+  const busIdRef = useRef<number | null>(null);
+
+  // GPS source: track with this phone's browser location, or rely on a Traccar tracker device on the bus
+  const [gpsSource, setGpsSource] = useState<"device" | "tracker">("device");
+  const trackerPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Keep refs in sync with state for use inside geolocation callback
+  useEffect(() => { tripIdRef.current = tripId; }, [tripId]);
+  useEffect(() => { busIdRef.current = bus?.id ?? null; }, [bus]);
+
+  // Load driver data
   useEffect(() => {
-    loadDrivers().finally(() => setLoading(false));
+// Get driver name from localStorage
+    const userStr = localStorage.getItem("saferoute_user");
+    if (userStr) {
+      try { setDriverName(JSON.parse(userStr).name || "Driver"); } catch { /* ignore */ }
+    }
+
+    // Fetch buses to find the one assigned to this driver
+    apiFetch("/api/buses")
+      .then(res => res.ok ? res.json() : [])
+      .then(async (buses: any[]) => {
+        if (!Array.isArray(buses)) { setError("Could not load bus data."); return; }
+
+        // Find bus assigned to this driver (match by user info)
+        const user = userStr ? JSON.parse(userStr) : null;
+        const myBus = buses.find((b: any) => b.driver_name === user?.name) || buses[0];
+
+        if (!myBus) {
+          setError("No bus is assigned to your account. Please contact your administrator.");
+          return;
+        }
+
+        setBus(myBus);
+
+        // Fetch students for this bus
+        const studentsRes = await apiFetch(`/api/buses/${myBus.id}/students`);
+        if (studentsRes.ok) {
+          const studentData = await studentsRes.json();
+          setStudents(Array.isArray(studentData) ? studentData : []);
+        }
+
+        // Fetch route stops
+        if (myBus.route_id) {
+          const stopsRes = await apiFetch(`/api/routes/${myBus.route_id}/stops`, {
+            headers: {},
+          });
+          if (stopsRes.ok) {
+            const stopsData = await stopsRes.json();
+            setRouteStops(Array.isArray(stopsData) ? stopsData : []);
+          }
+        }
+
+        // Check for existing active trip on this bus
+        const activeRes = await apiFetch("/api/trips/active");
+        if (activeRes.ok) {
+          const activeTrips = await activeRes.json();
+          if (Array.isArray(activeTrips)) {
+            const myTrip = activeTrips.find((t: any) => t.bus_id === myBus.id);
+            if (myTrip) {
+              setTripId(myTrip.trip_id);
+              setTripActive(true);
+              setTripStartedAt(myTrip.started_at);
+            }
+          }
+        }
+      })
+      .catch(() => setError("Could not connect to the server."))
+      .finally(() => setLoading(false));
   }, []);
 
-  const filtered = useMemo(() => {
-    if (!searchTerm.trim()) return drivers;
-    const s = searchTerm.toLowerCase();
-    return drivers.filter(d =>
-      d.name.toLowerCase().includes(s) ||
-      d.email.toLowerCase().includes(s) ||
-      (d.phone || "").toLowerCase().includes(s) ||
-      (d.bus_plate || "").toLowerCase().includes(s)
-    );
-  }, [drivers, searchTerm]);
+  // ── GPS Geolocation Tracking ──
+  const sendGpsUpdate = useCallback(async (lat: number, lng: number, speed: number, heading: number) => {
+    const currentTripId = tripIdRef.current;
+    const currentBusId = busIdRef.current;
+    if (!currentTripId || !currentBusId) return;
 
-  const selected = filtered.find(d => d.id === selectedId) || filtered[0] || null;
+    // Throttle: only send every 4 seconds
+    const now = Date.now();
+    if (now - lastGpsSent < 4000) return;
+    setLastGpsSent(now);
 
-  // Stats
-  const withBus = drivers.filter(d => d.bus_plate).length;
-  const totalTrips = drivers.reduce((sum, d) => sum + d.completed_trips, 0);
-  const unassigned = drivers.filter(d => !d.bus_plate).length;
-
-  // Add driver
-  async function handleAddDriver(e: React.FormEvent) {
-    e.preventDefault();
-    setSaveError("");
-    if (!addForm.name.trim() || !addForm.email.trim()) {
-      setSaveError("Name and email are required.");
-      return;
-    }
-    setSaving(true);
     try {
-      const res = await apiFetch("/api/drivers", {
+      await apiFetch("/api/trips/gps", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name: addForm.name.trim(),
-          email: addForm.email.trim().toLowerCase(),
-          phone: addForm.phone.trim() || null,
+          trip_id: currentTripId,
+          bus_id: currentBusId,
+          latitude: lat,
+          longitude: lng,
+          speed_kmh: Math.round(speed * 3.6), // m/s to km/h
+          heading_deg: Math.round(heading),
         }),
       });
-      const data = await res.json().catch(() => null);
-      if (!res.ok) { setSaveError(data?.error || "Could not create driver."); return; }
-      setShowAddModal(false);
-      setAddForm({ name: "", email: "", phone: "" });
-      await loadDrivers();
-      const pw = data?.generatedPassword;
-      const driverEmail = data?.email || addForm.email.trim();
-      if (data?.emailSent && pw) {
-        setSuccessMessage(`Driver added! Credentials sent to ${driverEmail}. Password: ${pw}`);
-      } else if (pw) {
-        setSuccessMessage(`Driver added! Login — Email: ${driverEmail} | Password: ${pw}`);
-      } else {
-        setSuccessMessage(`Driver ${addForm.name.trim()} added successfully.`);
-      }
-      setTimeout(() => setSuccessMessage(""), 12000);
-    } catch {
-      setSaveError("Could not connect to the server.");
-    } finally {
-      setSaving(false);
+    } catch { /* Silently ignore GPS send failures */ }
+  }, [lastGpsSent]);
+
+  function startGpsTracking() {
+    if (!navigator.geolocation) {
+      setGpsError("Geolocation is not supported by your browser.");
+      return;
     }
+
+    setGpsError("");
+    setGpsTracking(true);
+
+    const id = navigator.geolocation.watchPosition(
+      (position) => {
+        const { latitude, longitude, accuracy, speed, heading } = position.coords;
+        setGpsPosition({ lat: latitude, lng: longitude });
+        setGpsAccuracy(Math.round(accuracy));
+        setGpsSpeed(speed ? Math.round(speed * 3.6) : 0);
+
+        // Low accuracy warning
+        if (accuracy > 100) {
+          setGpsError(`Low GPS accuracy (${Math.round(accuracy)}m). Move to an open area for better signal.`);
+        } else {
+          setGpsError("");
+        }
+
+        // Send to backend
+        sendGpsUpdate(latitude, longitude, speed || 0, heading || 0);
+      },
+      (err) => {
+        setGpsTracking(false);
+        switch (err.code) {
+          case err.PERMISSION_DENIED:
+            setGpsError("Location permission denied. Please allow location access in your browser settings.");
+            break;
+          case err.POSITION_UNAVAILABLE:
+            setGpsError("GPS signal unavailable. Make sure GPS is enabled on your device.");
+            break;
+          case err.TIMEOUT:
+            setGpsError("GPS request timed out. Try moving to an area with better signal.");
+            break;
+          default:
+            setGpsError("An unknown GPS error occurred.");
+        }
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 2000, // Accept cached positions up to 2 seconds old
+      }
+    );
+
+    watchIdRef.current = id;
   }
 
-  // Delete driver
-  function openDeleteConfirm(driver: Driver) {
-    setDeleteTarget(driver);
-    setShowDeleteConfirm(true);
-    setDeleteError("");
-    setOpenMenuId(null);
-    setMenuPosition(null);
+  function stopGpsTracking() {
+    if (watchIdRef.current !== null) {
+      navigator.geolocation.clearWatch(watchIdRef.current);
+      watchIdRef.current = null;
+    }
+    setGpsTracking(false);
+    setGpsPosition(null);
+    setGpsAccuracy(null);
+    setGpsSpeed(0);
+    setGpsError("");
   }
 
-  async function handleDeleteDriver() {
-    if (!deleteTarget) return;
-    setDeleteSaving(true);
-    setDeleteError("");
+  // ── Tracker-device mode: don't use the phone's GPS at all — the backend's
+  // Traccar poller is already writing gps_logs for this bus, so just poll the
+  // latest logged position so the driver still sees their live location on the map.
+  function startTrackerPolling() {
+    setGpsError("");
+    setGpsTracking(true);
+
+    const poll = async () => {
+      const currentBusId = busIdRef.current;
+      if (!currentBusId) return;
+      try {
+        const res = await apiFetch(`/api/buses/${currentBusId}/location`);
+        if (!res.ok) return; // no fix logged yet — keep waiting silently
+        const loc = await res.json();
+        setGpsPosition({ lat: Number(loc.latitude), lng: Number(loc.longitude) });
+        setGpsSpeed(Math.round(Number(loc.speed_kmh) || 0));
+        setGpsAccuracy(null); // Traccar fixes don't carry the same accuracy figure as browser geolocation
+      } catch { /* Silently ignore — will retry on next poll */ }
+    };
+
+    poll(); // fetch immediately, then on an interval
+    trackerPollRef.current = setInterval(poll, 5000);
+  }
+
+  function stopTrackerPolling() {
+    if (trackerPollRef.current !== null) {
+      clearInterval(trackerPollRef.current);
+      trackerPollRef.current = null;
+    }
+    setGpsTracking(false);
+    setGpsPosition(null);
+    setGpsAccuracy(null);
+    setGpsSpeed(0);
+    setGpsError("");
+  }
+
+  // Cleanup geolocation / tracker polling on unmount
+  useEffect(() => {
+    return () => {
+      if (watchIdRef.current !== null) {
+        navigator.geolocation.clearWatch(watchIdRef.current);
+      }
+      if (trackerPollRef.current !== null) {
+        clearInterval(trackerPollRef.current);
+      }
+    };
+  }, []);
+
+  // Stats
+  const boardedCount = boardedIds.size;
+  const totalStudents = students.length;
+
+  // Group students by stop
+  const studentsByStop = useMemo(() => {
+    const groups: Record<string, StudentRecord[]> = {};
+    students.forEach(s => {
+      const stopKey = s.stop_name || "Unassigned";
+      if (!groups[stopKey]) groups[stopKey] = [];
+      groups[stopKey].push(s);
+    });
+    return groups;
+  }, [students]);
+
+  // Map data
+  const mapStops = routeStops.map(s => ({
+    id: String(s.id),
+    name: s.name,
+    lat: Number(s.latitude),
+    lng: Number(s.longitude),
+  }));
+  const routeCoords: [number, number][] = routeStops.map(s => [Number(s.latitude), Number(s.longitude)]);
+  const defaultPos = routeCoords.length > 0
+    ? { lat: routeCoords[0][0], lng: routeCoords[0][1] }
+    : { lat: -6.8, lng: 39.28 };
+  const mapPosition = gpsPosition || defaultPos;
+
+  // Start trip
+  async function startTrip() {
+    if (!bus) return;
+    setTripLoading(true);
+    setTripError("");
     try {
-      const res = await apiFetch(`/api/drivers/${deleteTarget.id}`, {
-        method: "DELETE",
+      const res = await apiFetch("/api/trips/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bus_id: bus.id, route_id: bus.route_id || 1 }),
       });
       const data = await res.json().catch(() => null);
-      if (!res.ok) { setDeleteError(data?.error || "Could not remove driver."); return; }
-      setShowDeleteConfirm(false);
-      setDeleteTarget(null);
-      await loadDrivers();
-      setSuccessMessage(`Driver ${deleteTarget.name} removed.`);
-      setTimeout(() => setSuccessMessage(""), 6000);
-    } catch {
-      setDeleteError("Could not connect to the server.");
-    } finally {
-      setDeleteSaving(false);
-    }
+      if (!res.ok) {
+        setTripError(data?.error || "Could not start trip.");
+        return;
+      }
+      setTripId(data.tripId);
+      setTripActive(true);
+      setTripStartedAt(new Date().toISOString());
+      setSuccessMsg(gpsSource === "tracker" ? "Trip started! Using the bus's GPS tracker." : "Trip started! GPS tracking active.");
+      setTimeout(() => setSuccessMsg(""), 4000);
+
+      // Start GPS tracking with whichever source the driver picked
+      if (gpsSource === "tracker") {
+        startTrackerPolling();
+      } else {
+        startGpsTracking();
+      }
+    } catch { setTripError("Could not connect to the server."); }
+    finally { setTripLoading(false); }
   }
+
+  // End trip
+  async function endTrip() {
+    if (!tripId) return;
+    setTripLoading(true);
+    setTripError("");
+
+    // Stop whichever GPS source was active
+    stopGpsTracking();
+    stopTrackerPolling();
+
+    try {
+      const res = await apiFetch("/api/trips/end", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ trip_id: tripId }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setTripError(data?.error || "Could not end trip.");
+        return;
+      }
+      setTripId(null);
+      setTripActive(false);
+      setTripStartedAt(null);
+      setSuccessMsg("Trip ended successfully.");
+      setTimeout(() => setSuccessMsg(""), 4000);
+    } catch { setTripError("Could not connect to the server."); }
+    finally { setTripLoading(false); }
+  }
+
+  // Mark student boarded
+  async function toggleBoarded(student: StudentRecord) {
+    if (!tripActive || !tripId) return;
+    if (boardedIds.has(student.id)) return; // Already boarded, can't undo
+
+    setBoardingLoading(student.id);
+    try {
+      const res = await apiFetch("/api/boarding/boarded", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ trip_id: tripId, student_id: student.id, stop_id: student.stop_id }),
+      });
+      if (res.ok) {
+        setBoardedIds(prev => new Set([...prev, student.id]));
+      }
+    } catch { /* ignore */ }
+    finally { setBoardingLoading(null); }
+  }
+
+  // Send emergency
+  async function sendEmergency() {
+    if (!bus || !tripActive || !tripId || emergencySent) return;
+    setEmergencyLoading(true);
+    try {
+      const res = await apiFetch("/api/alerts/emergency", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ trip_id: tripId, bus_id: bus.id }),
+      });
+      if (res.ok) {
+        setEmergencySent(true);
+        setSuccessMsg("Emergency alert sent! Administrators have been notified.");
+        setTimeout(() => { setEmergencySent(false); setSuccessMsg(""); }, 8000);
+      }
+    } catch { /* ignore */ }
+    finally { setEmergencyLoading(false); }
+  }
+
+  // Trip duration display
+  const [elapsed, setElapsed] = useState("0m");
+  useEffect(() => {
+    if (!tripActive || !tripStartedAt) return;
+    const interval = setInterval(() => {
+      const diff = Math.floor((Date.now() - new Date(tripStartedAt).getTime()) / 60000);
+      setElapsed(`${diff}m`);
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [tripActive, tripStartedAt]);
 
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center" style={{ backgroundColor: "var(--surface)" }}>
-        <div className="w-8 h-8 border-2 rounded-full animate-spin" style={{ borderColor: "var(--navy)", borderTopColor: "transparent" }} />
+        <div className="w-8 h-8 border-2 rounded-full animate-spin" style={{ borderColor: "var(--bus-yellow)", borderTopColor: "transparent" }} />
       </div>
     );
   }
 
   return (
     <div className="flex min-h-screen" style={{ backgroundColor: "var(--surface)" }}>
-      <Sidebar role="admin" items={NAV} accentColor="var(--navy)" userName="Admin User" />
+      <Sidebar role="driver" items={NAV} accentColor="#F5A623" userName={driverName} />
 
       <main className="flex-1 min-w-0 p-6 md:p-8 overflow-auto">
         {/* Header */}
-        <div className="flex items-start justify-between flex-wrap gap-4 mb-6">
+        <div className="flex items-center justify-between mb-6 flex-wrap gap-4">
           <div>
-            <h1 className="text-2xl font-bold" style={{ color: "var(--text-primary)" }}>Drivers</h1>
+            <h1 className="text-2xl font-bold" style={{ color: "var(--text-primary)" }}>My Trip</h1>
             <p className="text-sm mt-0.5" style={{ color: "var(--text-secondary)" }}>
-              Manage driver accounts, bus assignments, and trip records.
+              {bus ? `${bus.plate_number} · ${bus.route_name || "No route"} · ${bus.model || ""}` : "No bus assigned"}
             </p>
           </div>
-          <button
-            onClick={() => { setShowAddModal(true); setSaveError(""); }}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"
-            style={{ backgroundColor: "var(--navy)" }}
-          >
-            <Plus size={15} /> Add Driver
-          </button>
+          <div className="flex items-center gap-3">
+{tripActive && (
+              <div className="flex items-center gap-2">
+                <Radio size={14} style={{ color: gpsTracking ? "#0D9488" : "var(--slate)" }} className={gpsTracking ? "animate-pulse" : ""} />
+                <span className="text-xs font-medium" style={{ color: gpsTracking ? "#0D9488" : "var(--slate)" }}>
+                  {gpsTracking
+                    ? `${gpsSource === "tracker" ? "Tracker" : "Phone GPS"} active${gpsAccuracy ? ` · ±${gpsAccuracy}m` : ""}${gpsSpeed > 0 ? ` · ${gpsSpeed} km/h` : ""}`
+                    : gpsError ? "GPS error" : gpsSource === "tracker" ? "Waiting for tracker fix..." : "Waiting for GPS..."}
+                </span>
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* Stat cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-          <StatCard label="Total Drivers" value={drivers.length} icon={Users} color="#0F2B5B" sub={`${filtered.length} in current view`} />
-          <StatCard label="With Bus" value={withBus} icon={CheckCircle2} color="#0D9488" sub="Bus assigned" />
-          <StatCard label="Total Trips" value={totalTrips} icon={Bus} color="#F5A623" sub="Completed across all drivers" />
-          <StatCard label="Unassigned" value={unassigned} icon={AlertTriangle} color="#DC2626" sub="Missing bus assignment" />
-        </div>
+        {/* Error */}
+        {error && (
+          <div className="mb-5 flex items-center gap-2 rounded-xl border px-4 py-3 text-sm" style={{ borderColor: "var(--border)", backgroundColor: "var(--card)", color: "var(--text-secondary)" }}>
+            <AlertTriangle size={16} color="#F5A623" />{error}
+          </div>
+        )}
 
         {/* Alerts */}
-        {loadError && (
-          <div className="mb-5 flex items-center gap-2 rounded-xl border px-4 py-3 text-sm bg-white" style={{ borderColor: "var(--border)", color: "var(--text-secondary)" }}>
-            <AlertTriangle size={16} color="#F5A623" />
-            {loadError}
+        {tripError && (
+          <div className="mb-5 flex items-center gap-2 rounded-xl px-4 py-3 text-sm" style={{ backgroundColor: "var(--danger-light)", color: "var(--danger)" }}>
+            <AlertTriangle size={14} />{tripError}
           </div>
         )}
-
-        {successMessage && (
-          <div className="mb-5 flex items-center gap-2 rounded-xl border px-4 py-3 text-sm" style={{ borderColor: "#0D9488", backgroundColor: "#f0fdfa", color: "#0D9488" }}>
-            <CheckCircle2 size={16} />
-            <span className="flex-1">{successMessage}</span>
-            <button onClick={() => setSuccessMessage("")} className="h-6 w-6 rounded-lg flex items-center justify-center hover:bg-teal-100">
-              <X size={14} />
-            </button>
+        {successMsg && (
+          <div className="mb-5 flex items-center gap-2 rounded-xl border px-4 py-3 text-sm" style={{ borderColor: "#0D9488", backgroundColor: "var(--teal-light)", color: "var(--teal)" }}>
+            <CheckCircle2 size={16} />{successMsg}
           </div>
         )}
-
-        {/* Body: Table + Detail */}
-        <div className="grid xl:grid-cols-[1fr_340px] gap-6">
-          {/* Table */}
-          <section className="bg-white rounded-2xl border min-w-0" style={{ borderColor: "var(--border)" }}>
-            <div className="p-4 border-b" style={{ borderColor: "var(--border)" }}>
-              <div className="relative">
-                <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: "var(--slate)" }} />
-                <input
-                  placeholder="Search drivers by name, email, phone, or bus"
-                  value={searchTerm}
-                  onChange={e => setSearchTerm(e.target.value)}
-                  className="w-full pl-9 pr-4 py-2.5 rounded-xl text-sm border outline-none focus:ring-2"
-                  style={{ borderColor: "var(--border)", color: "var(--text-primary)" }}
-                />
-              </div>
+        {emergencySent && (
+          <div className="mb-5 rounded-2xl p-4 flex items-center gap-3 text-white" style={{ backgroundColor: "var(--danger)" }}>
+            <AlertTriangle size={18} />
+            <div>
+              <p className="font-semibold text-sm">Emergency alert sent!</p>
+              <p className="text-xs opacity-80">Administrator and school staff have been notified.</p>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[700px] text-sm">
-                <thead>
-                  <tr className="border-b" style={{ borderColor: "var(--border)" }}>
-                    <th className="text-left px-4 py-3 font-semibold" style={{ color: "var(--text-secondary)" }}>Driver</th>
-                    <th className="text-left px-4 py-3 font-semibold" style={{ color: "var(--text-secondary)" }}>Contact</th>
-                    <th className="text-left px-4 py-3 font-semibold" style={{ color: "var(--text-secondary)" }}>Bus</th>
-                    <th className="text-left px-4 py-3 font-semibold" style={{ color: "var(--text-secondary)" }}>Trips</th>
-                    <th className="text-left px-4 py-3 font-semibold" style={{ color: "var(--text-secondary)" }}>Status</th>
-                    <th className="text-left px-4 py-3 font-semibold w-16" style={{ color: "var(--text-secondary)" }}>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.length === 0 && (
-                    <tr>
-                      <td colSpan={6} className="text-center py-12" style={{ color: "var(--slate)" }}>
-                        <Users size={28} className="mx-auto mb-2 opacity-40" />
-                        <p className="text-sm">No drivers found</p>
-                      </td>
-                    </tr>
-                  )}
-                  {filtered.map(driver => {
-                    const isActive = driver.id === selected?.id;
-                    const initials = driver.name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase();
+          </div>
+        )}
+        {gpsError && tripActive && (
+          <div className="mb-5 flex items-center gap-2 rounded-xl px-4 py-3 text-sm" style={{ backgroundColor: "var(--bus-yellow-light)", color: "var(--bus-yellow)" }}>
+            <AlertTriangle size={14} />{gpsError}
+          </div>
+        )}
+
+        {/* Stats */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+          <StatCard label="Students Boarded" value={`${boardedCount}/${totalStudents}`} icon={Users} color="#F5A623" sub={tripActive ? "Tap to mark" : "Start trip first"} />
+          <StatCard label="Route" value={bus?.route_name || "—"} icon={Route} color="#0D9488" sub={`${routeStops.length} stops`} />
+          <StatCard label="Speed" value={tripActive ? `${gpsSpeed} km/h` : "—"} icon={Bus} color="#0F2B5B" sub={tripActive && gpsTracking ? "Live GPS speed" : "Not tracking"} />
+          <StatCard label="Trip Duration" value={tripActive ? elapsed : "—"} icon={Clock} color="#7C3AED" sub={tripActive ? "In progress" : "No active trip"} />
+        </div>
+
+        <div className="grid md:grid-cols-3 gap-6">
+          {/* Map */}
+          <div className="md:col-span-2 rounded-2xl border overflow-hidden" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)", height: "380px" }}>
+            <div className="px-4 py-3 border-b flex items-center justify-between" style={{ borderColor: "var(--border)" }}>
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: tripActive ? "#F5A623" : "var(--slate)" }} />
+                <p className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>
+                  {tripActive ? (gpsPosition ? "Your live position" : "Waiting for GPS signal") : "Waiting for trip to start"}
+                </p>
+              </div>
+              {bus && <span className="text-xs" style={{ color: "var(--slate)" }}>{bus.plate_number}</span>}
+            </div>
+            <div style={{ height: "335px" }}>
+              {mapPosition ? <BusMap busPosition={mapPosition} stops={mapStops} routeCoords={routeCoords} height="335px" /> : <div className="flex h-full items-center justify-center text-center"><div><MapPin size={30} className="mx-auto mb-3 opacity-30" style={{ color: "var(--slate)" }} /><p className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>{tripActive ? "Waiting for live GPS location" : "Waiting for trip to start"}</p><p className="mt-1 text-xs" style={{ color: "var(--slate)" }}>{tripActive ? "Your position will appear when GPS is available." : "Start your trip to begin live tracking."}</p></div></div>}
+            </div>
+          </div>
+
+          {/* Controls */}
+          <div className="space-y-4">
+            {/* Trip toggle */}
+            <div className="rounded-2xl border p-5" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+              <h2 className="font-semibold text-sm mb-3" style={{ color: "var(--text-primary)" }}>Trip Status</h2>
+              {!bus ? (
+                <p className="text-sm text-center py-3" style={{ color: "var(--slate)" }}>No bus assigned to your account.</p>
+              ) : (
+                <>
+                  {/* GPS source picker — locked once a trip is running */}
+                  <div className="mb-4">
+                    <span className="text-xs font-medium block mb-1.5" style={{ color: "var(--text-secondary)" }}>GPS Source</span>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button type="button" disabled={tripActive}
+                        onClick={() => setGpsSource("device")}
+                        className="py-2 rounded-lg text-xs font-semibold border transition-colors disabled:opacity-60"
+                        style={gpsSource === "device"
+                          ? { backgroundColor: "#0F2B5B", color: "white", borderColor: "#0F2B5B" }
+                          : { backgroundColor: "transparent", color: "var(--text-secondary)", borderColor: "var(--border)" }}>
+                        This phone
+                      </button>
+                      <button type="button" disabled={tripActive || !bus.traccar_device_id}
+                        onClick={() => setGpsSource("tracker")}
+                        title={!bus.traccar_device_id ? "No GPS tracker linked to this bus yet — ask your administrator to add one" : undefined}
+                        className="py-2 rounded-lg text-xs font-semibold border transition-colors disabled:opacity-40"
+                        style={gpsSource === "tracker"
+                          ? { backgroundColor: "#0F2B5B", color: "white", borderColor: "#0F2B5B" }
+                          : { backgroundColor: "transparent", color: "var(--text-secondary)", borderColor: "var(--border)" }}>
+                        Tracker device
+                      </button>
+                    </div>
+                    <p className="text-xs mt-1.5" style={{ color: "var(--slate)" }}>
+                      {!bus.traccar_device_id
+                        ? "No GPS tracker is linked to this bus, so only phone GPS is available."
+                        : gpsSource === "tracker"
+                          ? "Uses the bus's GPS tracker device — you can keep this page in the background."
+                          : "Uses this phone's location — keep this page open while driving."}
+                    </p>
+                  </div>
+
+                  <button onClick={tripActive ? endTrip : startTrip} disabled={tripLoading}
+                    className="w-full py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
+                    style={tripActive
+                      ? { backgroundColor: "#DC2626", color: "white" }
+                      : { backgroundColor: "#0D9488", color: "white" }}>
+                    {tripActive ? <><Square size={15} /> End Trip</> : <><Play size={15} /> Start Trip</>}
+                  </button>
+                  <p className="text-xs text-center mt-2" style={{ color: "var(--slate)" }}>
+                    {tripActive ? `Trip in progress · ${elapsed}` : "No active trip"}
+                  </p>
+                </>
+              )}
+            </div>
+
+            {/* Emergency */}
+            <div className="rounded-2xl border p-5" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+              <h2 className="font-semibold text-sm mb-1" style={{ color: "var(--text-primary)" }}>Emergency Alert</h2>
+              <p className="text-xs mb-3" style={{ color: "var(--text-secondary)" }}>
+                Instantly notifies all school administrators.
+              </p>
+              <button onClick={sendEmergency} disabled={emergencySent || !tripActive || emergencyLoading}
+                className="w-full py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-opacity disabled:opacity-50"
+                style={{ backgroundColor: "var(--danger-light)", color: "var(--danger)" }}>
+                <AlertTriangle size={15} />
+                {emergencyLoading ? "Sending..." : emergencySent ? "Alert sent" : "Send Emergency Alert"}
+              </button>
+            </div>
+
+            {/* Route stops quick view */}
+            {routeStops.length > 0 && (
+              <div className="rounded-2xl border p-5" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+                <h2 className="font-semibold text-sm mb-3" style={{ color: "var(--text-primary)" }}>Route Stops</h2>
+                <div className="space-y-2">
+                  {routeStops.map((stop, i) => {
+                    const hasStudents = students.some(s => s.stop_id === stop.id);
+                    const allBoarded = students.filter(s => s.stop_id === stop.id).every(s => boardedIds.has(s.id));
                     return (
-                      <tr
-                        key={driver.id}
-                        onClick={() => setSelectedId(driver.id)}
-                        className="border-b cursor-pointer transition-colors hover:bg-slate-50"
-                        style={{
-                          borderColor: "var(--border)",
-                          backgroundColor: isActive ? "color-mix(in srgb, var(--navy) 5%, var(--card))" : undefined,
-                        }}
-                      >
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-3">
-                            <div className="w-9 h-9 rounded-xl flex items-center justify-center text-sm font-bold flex-shrink-0"
-                              style={{ backgroundColor: "var(--bus-yellow-light)", color: "var(--navy)" }}>
-                              {initials}
-                            </div>
-                            <div>
-                              <p className="font-medium" style={{ color: "var(--text-primary)" }}>{driver.name}</p>
-                              <p className="text-xs" style={{ color: "var(--slate)" }}>{driver.email}</p>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3">
-                          <p style={{ color: "var(--text-primary)" }}>{driver.phone || "—"}</p>
-                          <p className="text-xs" style={{ color: "var(--slate)" }}>{driver.email}</p>
-                        </td>
-                        <td className="px-4 py-3">
-                          {driver.bus_plate ? (
-                            <div>
-                              <p className="font-medium" style={{ color: "var(--text-primary)" }}>{driver.bus_plate}</p>
-                              <p className="text-xs" style={{ color: "var(--slate)" }}>{driver.route_name || "No route"}</p>
-                            </div>
-                          ) : (
-                            <span style={{ color: "var(--slate)" }}>Unassigned</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3">
-                          <p className="font-medium" style={{ color: "var(--text-primary)" }}>{driver.completed_trips}</p>
-                          <p className="text-xs" style={{ color: "var(--slate)" }}>
-                            {driver.active_trips > 0 ? `${driver.active_trips} active now` : `${driver.total_trips} total`}
-                          </p>
-                        </td>
-                        <td className="px-4 py-3">
-                          {driver.bus_plate ? (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold"
-                              style={{ backgroundColor: "var(--teal-light)", color: "var(--teal)" }}>
-                              <CheckCircle2 size={12} /> Assigned
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold"
-                              style={{ backgroundColor: "var(--danger-light)", color: "var(--danger)" }}>
-                              <AlertTriangle size={12} /> Unassigned
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (openMenuId === driver.id) {
-                                setOpenMenuId(null);
-                                setMenuPosition(null);
-                              } else {
-                                const rect = e.currentTarget.getBoundingClientRect();
-                                setMenuPosition({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
-                                setOpenMenuId(driver.id);
-                              }
-                            }}
-                            className="h-8 w-8 rounded-lg inline-flex items-center justify-center hover:bg-slate-100"
-                            style={{ color: "var(--slate)" }}
-                            title="Driver actions"
-                          >
-                            <MoreHorizontal size={16} />
-                          </button>
-                        </td>
-                      </tr>
+                      <div key={stop.id} className="flex items-center gap-2">
+                        <div className="w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
+                          style={{
+                            backgroundColor: allBoarded && hasStudents ? "var(--teal)" : "var(--border)",
+                            color: allBoarded && hasStudents ? "white" : "var(--slate)",
+                          }}>
+                          {allBoarded && hasStudents ? <CheckCircle2 size={12} /> : i + 1}
+                        </div>
+                        <p className="text-xs flex-1" style={{ color: "var(--text-primary)" }}>{stop.name}</p>
+                        {hasStudents && (
+                          <span className="text-xs" style={{ color: "var(--slate)" }}>
+                            {students.filter(s => s.stop_id === stop.id).filter(s => boardedIds.has(s.id)).length}/
+                            {students.filter(s => s.stop_id === stop.id).length}
+                          </span>
+                        )}
+                      </div>
                     );
                   })}
-                </tbody>
-              </table>
-            </div>
-          </section>
-
-          {/* Detail panel */}
-          <aside className="space-y-5">
-            {selected ? (
-              <>
-                <div className="bg-white rounded-2xl border p-5" style={{ borderColor: "var(--border)" }}>
-                  <div className="flex items-center justify-between mb-4">
-                    <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--slate)" }}>Selected Driver</p>
-                    <ShieldCheck size={18} style={{ color: "var(--teal)" }} />
-                  </div>
-                  <h2 className="text-lg font-bold mb-4" style={{ color: "var(--text-primary)" }}>{selected.name}</h2>
-
-                  <div className="grid grid-cols-2 gap-3 mb-4">
-                    <div className="rounded-xl border p-3" style={{ borderColor: "var(--border)" }}>
-                      <p className="text-xs" style={{ color: "var(--slate)" }}>Bus</p>
-                      <p className="text-sm font-semibold mt-0.5" style={{ color: "var(--text-primary)" }}>{selected.bus_plate || "None"}</p>
-                    </div>
-                    <div className="rounded-xl border p-3" style={{ borderColor: "var(--border)" }}>
-                      <p className="text-xs" style={{ color: "var(--slate)" }}>Route</p>
-                      <p className="text-sm font-semibold mt-0.5" style={{ color: "var(--text-primary)" }}>{selected.route_name || "None"}</p>
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl border p-3 mb-4" style={{ borderColor: "var(--border)" }}>
-                    <p className="text-xs mb-2" style={{ color: "var(--slate)" }}>Trip Records</p>
-                    <div className="grid grid-cols-3 gap-2 text-center">
-                      <div>
-                        <p className="text-lg font-bold" style={{ color: "var(--text-primary)" }}>{selected.total_trips}</p>
-                        <p className="text-xs" style={{ color: "var(--slate)" }}>Total</p>
-                      </div>
-                      <div>
-                        <p className="text-lg font-bold" style={{ color: "var(--teal)" }}>{selected.completed_trips}</p>
-                        <p className="text-xs" style={{ color: "var(--slate)" }}>Done</p>
-                      </div>
-                      <div>
-                        <p className="text-lg font-bold" style={{ color: selected.active_trips > 0 ? "var(--bus-yellow)" : "var(--text-primary)" }}>{selected.active_trips}</p>
-                        <p className="text-xs" style={{ color: "var(--slate)" }}>Active</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2.5 mb-4">
-                    <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--slate)" }}>Contact</p>
-                    <div className="flex items-center gap-3">
-                      <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
-                        style={{ backgroundColor: "color-mix(in srgb, var(--navy) 10%, transparent)", color: "var(--navy)" }}>
-                        <Mail size={13} />
-                      </div>
-                      <p className="text-sm truncate" style={{ color: "var(--text-primary)" }}>{selected.email}</p>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
-                        style={{ backgroundColor: "color-mix(in srgb, var(--navy) 10%, transparent)", color: "var(--navy)" }}>
-                        <Phone size={13} />
-                      </div>
-                      <p className="text-sm" style={{ color: "var(--text-primary)" }}>{selected.phone || "Not provided"}</p>
-                    </div>
-                    {selected.bus_model && (
-                      <div className="flex items-center gap-3">
-                        <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
-                          style={{ backgroundColor: "color-mix(in srgb, var(--bus-yellow) 15%, transparent)", color: "var(--bus-yellow)" }}>
-                          <Bus size={13} />
-                        </div>
-                        <p className="text-sm" style={{ color: "var(--text-primary)" }}>{selected.bus_model}</p>
-                      </div>
-                    )}
-                  </div>
-
-                  {selected.last_trip_date && (
-                    <p className="text-xs" style={{ color: "var(--slate)" }}>
-                      Last trip: {new Date(selected.last_trip_date).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
-                    </p>
-                  )}
                 </div>
-
-                <button
-                  onClick={() => selected && openDeleteConfirm(selected)}
-                  className="w-full py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 border"
-                  style={{ borderColor: "var(--danger)", color: "var(--danger)", backgroundColor: "var(--danger-light)" }}
-                >
-                  <Trash2 size={14} /> Remove Driver
-                </button>
-              </>
-            ) : (
-              <div className="bg-white rounded-2xl border p-5 text-center" style={{ borderColor: "var(--border)" }}>
-                <Users size={28} className="mx-auto mb-2 opacity-30" style={{ color: "var(--slate)" }} />
-                <p className="text-sm" style={{ color: "var(--slate)" }}>Select a driver to view details.</p>
               </div>
             )}
-          </aside>
+          </div>
+        </div>
+
+        {/* Student boarding list */}
+        <div className="mt-6 rounded-2xl border p-5" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="font-semibold text-sm" style={{ color: "var(--text-primary)" }}>
+              Student Boarding List
+              <span className="font-normal ml-2" style={{ color: "var(--slate)" }}>({boardedCount} / {totalStudents} boarded)</span>
+            </h2>
+            {tripActive && (
+              <span className="text-xs px-2 py-1 rounded-full" style={{ backgroundColor: "var(--teal-light)", color: "var(--teal)" }}>
+                Tap to mark boarded
+              </span>
+            )}
+          </div>
+
+          {totalStudents === 0 ? (
+            <div className="text-center py-8">
+              <Users size={28} className="mx-auto mb-2 opacity-30" style={{ color: "var(--slate)" }} />
+              <p className="text-sm" style={{ color: "var(--slate)" }}>No students assigned to this bus.</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {Object.entries(studentsByStop).map(([stopName, stopStudents]) => (
+                <div key={stopName}>
+                  <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: "var(--slate)" }}>
+                    <MapPin size={12} className="inline mr-1" />{stopName}
+                  </p>
+                  <div className="divide-y" style={{ borderColor: "var(--border)" }}>
+                    {stopStudents.map(s => {
+                      const isBoarded = boardedIds.has(s.id);
+                      const isLoading = boardingLoading === s.id;
+                      return (
+                        <div key={s.id} className="flex items-center gap-4 py-3">
+                          <button
+                            onClick={() => toggleBoarded(s)}
+                            disabled={!tripActive || isBoarded || isLoading}
+                            className="w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors disabled:cursor-not-allowed"
+                            style={isBoarded
+                              ? { backgroundColor: "#0D9488", borderColor: "#0D9488" }
+                              : { borderColor: "var(--border)" }}>
+                            {isBoarded && <CheckCircle2 size={14} color="white" />}
+                            {isLoading && <div className="w-3 h-3 border-2 rounded-full animate-spin" style={{ borderColor: "var(--teal)", borderTopColor: "transparent" }} />}
+                          </button>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium truncate"
+                              style={{ color: isBoarded ? "var(--text-secondary)" : "var(--text-primary)", textDecoration: isBoarded ? "line-through" : undefined }}>
+                              {s.name}
+                            </p>
+                            <p className="text-xs truncate" style={{ color: "var(--slate)" }}>
+                              {s.grade || ""} · {s.parent_name}{s.parent_phone ? ` · ${s.parent_phone}` : ""}
+                            </p>
+                          </div>
+                          <span className="text-xs font-medium flex-shrink-0"
+                            style={{ color: isBoarded ? "#0D9488" : "var(--slate)" }}>
+                            {isBoarded ? "Boarded" : "Waiting"}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </main>
-
-      {/* Row action menu (fixed position) */}
-      {openMenuId !== null && menuPosition && (() => {
-        const menuDriver = drivers.find(d => d.id === openMenuId);
-        if (!menuDriver) return null;
-        return (
-          <>
-            <div className="fixed inset-0 z-20" onClick={() => { setOpenMenuId(null); setMenuPosition(null); }} />
-            <div className="fixed w-40 bg-white rounded-xl border shadow-lg z-30"
-              style={{ borderColor: "var(--border)", top: menuPosition.top, right: menuPosition.right }}>
-              <button
-                onClick={(e) => { e.stopPropagation(); openDeleteConfirm(menuDriver); }}
-                className="w-full flex items-center gap-2 px-4 py-2.5 text-sm hover:bg-red-50 rounded-xl"
-                style={{ color: "var(--danger)" }}
-              >
-                <Trash2 size={14} /> Remove driver
-              </button>
-            </div>
-          </>
-        );
-      })()}
-
-      {/* Add Driver Modal */}
-      {showAddModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center px-4 py-6" style={{ backgroundColor: "rgba(15,23,42,0.45)" }}>
-          <div className="w-full max-w-lg bg-white rounded-2xl border shadow-2xl" style={{ borderColor: "var(--border)" }}>
-            <div className="flex items-center justify-between px-6 py-4 border-b" style={{ borderColor: "var(--border)" }}>
-              <div>
-                <h2 className="text-lg font-bold" style={{ color: "var(--text-primary)" }}>Add Driver</h2>
-                <p className="text-xs mt-0.5" style={{ color: "var(--text-secondary)" }}>Create a new driver account.</p>
-              </div>
-              <button onClick={() => setShowAddModal(false)} className="h-8 w-8 rounded-lg flex items-center justify-center hover:bg-slate-100" style={{ color: "var(--slate)" }}>
-                <X size={18} />
-              </button>
-            </div>
-            <form onSubmit={handleAddDriver} className="p-6 space-y-4">
-              <div className="space-y-4">
-                <label className="space-y-1.5 block">
-                  <span className="text-sm font-medium" style={{ color: "var(--text-secondary)" }}>Full name</span>
-                  <input
-                    value={addForm.name}
-                    onChange={e => setAddForm(f => ({ ...f, name: e.target.value }))}
-                    placeholder="e.g. John Mwenda"
-                    className="w-full px-4 py-2.5 rounded-xl text-sm border outline-none focus:ring-2"
-                    style={{ borderColor: "var(--border)", color: "var(--text-primary)" }}
-                  />
-                </label>
-                <label className="space-y-1.5 block">
-                  <span className="text-sm font-medium" style={{ color: "var(--text-secondary)" }}>Email</span>
-                  <input
-                    type="email"
-                    value={addForm.email}
-                    onChange={e => setAddForm(f => ({ ...f, email: e.target.value }))}
-                    placeholder="e.g. driver@school.tz"
-                    className="w-full px-4 py-2.5 rounded-xl text-sm border outline-none focus:ring-2"
-                    style={{ borderColor: "var(--border)", color: "var(--text-primary)" }}
-                  />
-                </label>
-                <label className="space-y-1.5 block">
-                  <span className="text-sm font-medium" style={{ color: "var(--text-secondary)" }}>Phone number</span>
-                  <input
-                    value={addForm.phone}
-                    onChange={e => setAddForm(f => ({ ...f, phone: e.target.value }))}
-                    placeholder="e.g. +255712345678"
-                    className="w-full px-4 py-2.5 rounded-xl text-sm border outline-none focus:ring-2"
-                    style={{ borderColor: "var(--border)", color: "var(--text-primary)" }}
-                  />
-                </label>
-              </div>
-              {saveError && (
-                <div className="flex items-center gap-2 rounded-xl px-3 py-2 text-sm" style={{ backgroundColor: "var(--danger-light)", color: "var(--danger)" }}>
-                  <AlertTriangle size={14} /> {saveError}
-                </div>
-              )}
-              <div className="flex items-center justify-end gap-3 pt-2">
-                <button type="button" onClick={() => setShowAddModal(false)}
-                  className="px-4 py-2.5 rounded-xl text-sm font-semibold border bg-white"
-                  style={{ borderColor: "var(--border)", color: "var(--text-secondary)" }}>
-                  Cancel
-                </button>
-                <button type="submit" disabled={saving}
-                  className="px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-70"
-                  style={{ backgroundColor: "var(--navy)" }}>
-                  {saving ? "Creating..." : "Create Driver"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Delete Confirmation Modal */}
-      {showDeleteConfirm && deleteTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center px-4 py-6" style={{ backgroundColor: "rgba(15,23,42,0.45)" }}>
-          <div className="w-full max-w-md bg-white rounded-2xl border shadow-2xl p-6" style={{ borderColor: "var(--border)" }}>
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: "var(--danger-light)" }}>
-                <AlertTriangle size={20} style={{ color: "var(--danger)" }} />
-              </div>
-              <div>
-                <h2 className="text-lg font-bold" style={{ color: "var(--text-primary)" }}>Remove Driver</h2>
-                <p className="text-xs" style={{ color: "var(--text-secondary)" }}>This will deactivate the driver account.</p>
-              </div>
-            </div>
-            <p className="text-sm mb-1" style={{ color: "var(--text-secondary)" }}>
-              Are you sure you want to remove <strong style={{ color: "var(--text-primary)" }}>{deleteTarget.name}</strong> from the driver roster?
-            </p>
-            {deleteTarget.bus_plate && (
-              <p className="text-sm mb-3" style={{ color: "var(--slate)" }}>
-                Their bus ({deleteTarget.bus_plate}) will become unassigned.
-              </p>
-            )}
-            <p className="text-xs mb-5" style={{ color: "var(--slate)" }}>
-              This action will deactivate the driver account. They will no longer be able to log in.
-            </p>
-            {deleteError && (
-              <div className="flex items-center gap-2 rounded-xl px-3 py-2 text-sm mb-4" style={{ backgroundColor: "var(--danger-light)", color: "var(--danger)" }}>
-                <AlertTriangle size={14} /> {deleteError}
-              </div>
-            )}
-            <div className="flex items-center justify-end gap-3">
-              <button onClick={() => { setShowDeleteConfirm(false); setDeleteTarget(null); }}
-                className="px-4 py-2.5 rounded-xl text-sm font-semibold border bg-white"
-                style={{ borderColor: "var(--border)", color: "var(--text-secondary)" }}>
-                Cancel
-              </button>
-              <button onClick={handleDeleteDriver} disabled={deleteSaving}
-                className="px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-70"
-                style={{ backgroundColor: "var(--danger)" }}>
-                {deleteSaving ? "Removing..." : "Remove Driver"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
