@@ -135,11 +135,10 @@ export default function AdminDashboard() {
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (!isMounted || !data) return;
-        if (
-          typeof data.latitude === "number" &&
-          typeof data.longitude === "number"
-        ) {
-          setBusPos({ lat: data.latitude, lng: data.longitude });
+        const lat = Number(data.latitude);
+        const lng = Number(data.longitude);
+        if (!Number.isNaN(lat) && !Number.isNaN(lng)) {
+          setBusPos({ lat, lng });
         }
       })
       .catch(() => {

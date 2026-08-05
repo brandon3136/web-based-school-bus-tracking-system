@@ -71,6 +71,21 @@ export default function ParentDashboard() {
     if (!student?.bus_id) return;
     const busId = student.bus_id;
 
+    // Get the bus's last known position immediately, in case a trip is
+    // already in progress when this page loads (don't wait for the next live update).
+    apiFetch(`/api/buses/${busId}/location`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!data) return;
+        const lat = Number(data.latitude);
+        const lng = Number(data.longitude);
+        if (!Number.isNaN(lat) && !Number.isNaN(lng)) {
+          setBusPos({ lat, lng });
+          if (data.trip_status === "in_progress") setGpsLive(true);
+        }
+      })
+      .catch(() => {});
+
     subscribeBus(busId);
 
     onGpsUpdate((data: GpsUpdate) => {
