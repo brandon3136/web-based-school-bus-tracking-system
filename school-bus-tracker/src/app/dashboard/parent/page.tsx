@@ -57,19 +57,35 @@ export default function ParentDashboard() {
   const [busPos, setBusPos] = useState<{ lat: number; lng: number } | null>(null);
   const [eta, setEta] = useState<number | null>(null);
   const [gpsLive, setGpsLive] = useState(false);
+  const [hasActiveTrip, setHasActiveTrip] = useState(false);
   const [emergencyBanner, setEmergencyBanner] = useState<{ message: string; timestamp: string } | null>(null);
   const [todayAlerts, setTodayAlerts] = useState<Array<{ id: number; title: string; message: string; created_at: string; plate_number?: string }>>([]);
 
   useEffect(() => { apiFetch("/api/alerts/mine").then(r => r.ok ? r.json() : []).then((rows) => setTodayAlerts(rows.filter((a: { created_at: string }) => new Date(a.created_at).toDateString() === new Date().toDateString()))).catch(() => {}); }, []);
 
   // Socket.io connection for real-time GPS
-  const { connected: socketConnected, subscribeBus, unsubscribeBus, onGpsUpdate, onEmergencyAlert } = useSocket();
+  const { connected: socketConnected, subscribeBus, unsubscribeBus, onGpsUpdate, offGpsUpdate, onTripStarted, offTripStarted, onTripEnded, offTripEnded, onEmergencyAlert } = useSocket();
 
   // Subscribe to bus room and listen for GPS updates
   useEffect(() => {
     const student = students[selectedIdx];
-    if (!student?.bus_id) return;
+    if (!student?.bus_id) { setHasActiveTrip(false); return; }
     const busId = student.bus_id;
+
+    setGpsLive(false);
+    setHasActiveTrip(false);
+
+    // Check whether this bus currently has an in-progress trip at all — this
+    // is what actually distinguishes "no active trip" from "trip active but
+    // no GPS fix yet", which a missing/last-known position alone can't tell you.
+    apiFetch("/api/trips/active")
+      .then((res) => (res.ok ? res.json() : []))
+      .then((trips) => {
+        if (Array.isArray(trips) && trips.some((t: { bus_id: number }) => t.bus_id === busId)) {
+          setHasActiveTrip(true);
+        }
+      })
+      .catch(() => {});
 
     // Get the bus's last known position immediately, in case a trip is
     // already in progress when this page loads (don't wait for the next live update).
@@ -88,17 +104,34 @@ export default function ParentDashboard() {
 
     subscribeBus(busId);
 
-    onGpsUpdate((data: GpsUpdate) => {
+    const handleGpsUpdate = (data: GpsUpdate) => {
       if (data.busId === busId) {
         setBusPos({ lat: data.latitude, lng: data.longitude });
         setGpsLive(true);
+        setHasActiveTrip(true);
       }
-    });
+    };
+    const handleTripStarted = (data: { busId: number }) => {
+      if (data.busId === busId) setHasActiveTrip(true);
+    };
+    const handleTripEnded = () => {
+      // Any trip ending while we're only tracking one bus at a time is
+      // effectively this bus's trip ending, from this page's perspective.
+      setHasActiveTrip(false);
+      setGpsLive(false);
+    };
+
+    onGpsUpdate(handleGpsUpdate);
+    onTripStarted(handleTripStarted);
+    onTripEnded(handleTripEnded);
 
     return () => {
       unsubscribeBus(busId);
+      offGpsUpdate(handleGpsUpdate);
+      offTripStarted(handleTripStarted);
+      offTripEnded(handleTripEnded);
     };
-  }, [selectedIdx, students, subscribeBus, unsubscribeBus, onGpsUpdate]);
+  }, [selectedIdx, students, subscribeBus, unsubscribeBus, onGpsUpdate, offGpsUpdate, onTripStarted, offTripStarted, onTripEnded, offTripEnded]);
 
   // Listen for real-time emergency alerts. These arrive on this parent's own
   // socket room (server-side scoped to their children's buses), independent
@@ -310,7 +343,13 @@ if (userStr) {
               <div className="flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: gpsLive ? "#0D9488" : "var(--slate)" }} />
                 <p className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>
-                  {gpsLive ? "Live tracking" : routeCoords.length > 0 ? "Waiting for GPS signal..." : "No route assigned yet"}
+                  {gpsLive
+                    ? "Live tracking"
+                    : routeCoords.length === 0
+                    ? "No route assigned yet"
+                    : !hasActiveTrip
+                    ? "No active trip"
+                    : "Waiting for GPS signal..."}
                 </p>
               </div>
               {socketConnected && (
@@ -321,8 +360,16 @@ if (userStr) {
               )}
             </div>
             <div style={{ height: "375px" }}>
-              {busPos && mapStops.length > 0 ? (
+              {busPos && mapStops.length > 0 && hasActiveTrip ? (
                 <BusMap busPosition={busPos} stops={mapStops} routeCoords={routeCoords} height="375px" />
+              ) : routeCoords.length > 0 && !hasActiveTrip ? (
+                <div className="flex items-center justify-center h-full" style={{ color: "var(--slate)" }}>
+                  <div className="text-center">
+                    <MapPin size={32} className="mx-auto mb-2 opacity-40" />
+                    <p className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>No active trip</p>
+                    <p className="mt-1 text-xs">This bus isn't on a trip right now.</p>
+                  </div>
+                </div>
               ) : (
                 <div className="flex items-center justify-center h-full" style={{ color: "var(--slate)" }}>
                   <div className="text-center">

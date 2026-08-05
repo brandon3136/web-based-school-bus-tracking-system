@@ -14,7 +14,9 @@ interface UseSocketReturn {
   subscribeBus: (busId: number) => void;
   unsubscribeBus: (busId: number) => void;
   onGpsUpdate: (callback: (data: GpsUpdate) => void) => void;  offGpsUpdate: (callback: (data: GpsUpdate) => void) => void;  onTripStarted: (callback: (data: { tripId: number; busId: number; driverId: number }) => void) => void;
+  offTripStarted: (callback: (data: { tripId: number; busId: number; driverId: number }) => void) => void;
   onTripEnded: (callback: (data: { tripId: number }) => void) => void;
+  offTripEnded: (callback: (data: { tripId: number }) => void) => void;
   onEmergencyAlert: (callback: (data: EmergencyAlert) => void) => void;
 }
 
@@ -138,9 +140,17 @@ export function useSocket(options: UseSocketOptions = {}): UseSocketReturn {
     addCallback("trip:started", callback);
   }, [addCallback]);
 
+  const offTripStarted = useCallback((callback: (data: { tripId: number; busId: number; driverId: number }) => void) => {
+    removeCallback("trip:started", callback);
+  }, [removeCallback]);
+
   const onTripEnded = useCallback((callback: (data: { tripId: number }) => void) => {
     addCallback("trip:ended", callback);
   }, [addCallback]);
+
+  const offTripEnded = useCallback((callback: (data: { tripId: number }) => void) => {
+    removeCallback("trip:ended", callback);
+  }, [removeCallback]);
 
   const onEmergencyAlert = useCallback((callback: (data: EmergencyAlert) => void) => {
     addCallback("emergency:alert", callback);
@@ -155,7 +165,9 @@ export function useSocket(options: UseSocketOptions = {}): UseSocketReturn {
     onGpsUpdate,
     offGpsUpdate,
     onTripStarted,
+    offTripStarted,
     onTripEnded,
+    offTripEnded,
     onEmergencyAlert,
   };
 }
