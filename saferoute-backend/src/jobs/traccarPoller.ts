@@ -51,8 +51,20 @@ async function poll(): Promise<void> {
     const bus = busByDevice.get(String(pos.deviceId));
     if (!bus) continue; // this device isn't mapped to a bus with an active trip right now
 
-    if (lastPositionId.get(pos.deviceId) === pos.id) continue; // already logged this exact fix
-    lastPositionId.set(pos.deviceId, pos.id);
+    if (lastPositionId.get(pos.deviceId) === pos.id) continue; // already processed this exact fix
+    lastPositionId.set(pos.deviceId, pos.id); // mark as processed either way, so we don't re-warn every poll
+
+    // Skip fixes the tracker itself doesn't trust yet (e.g. cold start, no satellite lock).
+    // These commonly report bogus coordinates like (0,0), which shows up as "in the ocean" on the map.
+    if (pos.valid === false) {
+      console.warn(`Traccar device ${pos.deviceId}: skipping invalid fix (no GPS lock yet)`);
+      continue;
+    }
+    // Extra safety net: (0,0) — "null island" — is never a real bus location for this fleet.
+    if (Math.abs(pos.latitude) < 0.0001 && Math.abs(pos.longitude) < 0.0001) {
+      console.warn(`Traccar device ${pos.deviceId}: skipping (0,0) fix`);
+      continue;
+    }
 
     const latitude = pos.latitude;
     const longitude = pos.longitude;

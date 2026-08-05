@@ -18,6 +18,8 @@ export interface TraccarPosition {
   speed: number;      // knots
   course: number;      // degrees, 0-360
   fixTime: string;      // ISO timestamp
+  valid: boolean;       // false = device hasn't got a real GPS fix yet (coordinates are unreliable)
+  outdated: boolean;    // true = this is a stale/last-known position, not a fresh report
   attributes: Record<string, unknown>;
 }
 
