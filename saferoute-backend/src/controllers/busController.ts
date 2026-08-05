@@ -39,11 +39,11 @@ export async function getBusById(req: Request, res: Response): Promise<void> {
 }
 
 export async function createBus(req: Request, res: Response): Promise<void> {
-  const { plate_number, model, capacity, driver_id, route_id } = req.body;
+  const { plate_number, model, capacity, driver_id, route_id, traccar_device_id } = req.body;
   try {
     const [result] = await pool.query(
-      "INSERT INTO buses (plate_number, model, capacity, driver_id) VALUES (?, ?, ?, ?)",
-      [plate_number, model || null, capacity || 30, driver_id || null]
+      "INSERT INTO buses (plate_number, model, capacity, driver_id, traccar_device_id) VALUES (?, ?, ?, ?, ?)",
+      [plate_number, model || null, capacity || 30, driver_id || null, traccar_device_id || null]
     );
     const id = (result as { insertId: number }).insertId;
 
@@ -55,7 +55,7 @@ export async function createBus(req: Request, res: Response): Promise<void> {
       );
     }
 
-    res.status(201).json({ id, plate_number, model, capacity, driver_id, route_id: route_id || null });
+    res.status(201).json({ id, plate_number, model, capacity, driver_id, route_id: route_id || null, traccar_device_id: traccar_device_id || null });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Internal server error" });
@@ -63,11 +63,11 @@ export async function createBus(req: Request, res: Response): Promise<void> {
 }
 
 export async function updateBus(req: Request, res: Response): Promise<void> {
-  const { plate_number, model, capacity, driver_id, is_active, route_id } = req.body;
+  const { plate_number, model, capacity, driver_id, is_active, route_id, traccar_device_id } = req.body;
   try {
     await pool.query(
-      "UPDATE buses SET plate_number=?, model=?, capacity=?, driver_id=?, is_active=? WHERE id=?",
-      [plate_number, model, capacity, driver_id, is_active ?? true, req.params.id]
+      "UPDATE buses SET plate_number=?, model=?, capacity=?, driver_id=?, is_active=?, traccar_device_id=? WHERE id=?",
+      [plate_number, model, capacity, driver_id, is_active ?? true, traccar_device_id || null, req.params.id]
     );
 
     // Update route assignment: remove old, insert new

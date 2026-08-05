@@ -3,6 +3,7 @@ import dotenv from "dotenv";
 import app from "./app";
 import { initSocket } from "./socket/socketServer";
 import { initWebPush } from "./services/pushService";
+import { startTraccarPoller } from "./jobs/traccarPoller";
 import pool from "./config/db";
 
 dotenv.config();
@@ -27,6 +28,9 @@ async function main() {
 
   // Configure Web Push
   initWebPush();
+
+  // Start polling Traccar for GPS positions (no-op if TRACCAR_URL isn't set)
+  startTraccarPoller();
 
   httpServer.on("error", (err: NodeJS.ErrnoException) => {
     console.error("HTTP server failed:", err);

@@ -26,13 +26,14 @@ CREATE TABLE IF NOT EXISTS users (
 -- BUSES
 -- ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS buses (
-  id            INT AUTO_INCREMENT PRIMARY KEY,
-  plate_number  VARCHAR(20) NOT NULL UNIQUE,
-  model         VARCHAR(80),
-  capacity      INT NOT NULL DEFAULT 30,
-  driver_id     INT,
-  is_active     BOOLEAN DEFAULT TRUE,
-  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+  id                INT AUTO_INCREMENT PRIMARY KEY,
+  plate_number      VARCHAR(20) NOT NULL UNIQUE,
+  model             VARCHAR(80),
+  capacity          INT NOT NULL DEFAULT 30,
+  driver_id         INT,
+  traccar_device_id VARCHAR(50) UNIQUE,
+  is_active         BOOLEAN DEFAULT TRUE,
+  created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (driver_id) REFERENCES users(id) ON DELETE SET NULL,
   INDEX idx_driver (driver_id)
 );

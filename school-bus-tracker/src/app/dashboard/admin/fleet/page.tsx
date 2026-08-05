@@ -30,6 +30,7 @@ interface BusRecord {
   driver_phone: string | null;
   route_id: number | null;
   route_name: string | null;
+  traccar_device_id: string | null;
   is_active: number;
 }
 
@@ -67,7 +68,7 @@ export default function FleetPage() {
   const [menuPosition, setMenuPosition] = useState<{ top: number; right: number } | null>(null);
 
   // Form state
-  const [form, setForm] = useState({ plate_number: "", model: "", capacity: "30", driver_id: "", route_id: "" });
+  const [form, setForm] = useState({ plate_number: "", model: "", capacity: "30", driver_id: "", route_id: "", traccar_device_id: "" });
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
@@ -118,7 +119,7 @@ export default function FleetPage() {
   const onRoute = buses.filter(b => b.route_name).length;
   const noDriver = buses.filter(b => !b.driver_id).length;
 
-  function resetForm() { setForm({ plate_number: "", model: "", capacity: "30", driver_id: "", route_id: "" }); setSaveError(""); }
+  function resetForm() { setForm({ plate_number: "", model: "", capacity: "30", driver_id: "", route_id: "", traccar_device_id: "" }); setSaveError(""); }
 
   function openEditModal(bus: BusRecord) {
     setEditingBus(bus);
@@ -128,6 +129,7 @@ export default function FleetPage() {
       capacity: String(bus.capacity),
       driver_id: bus.driver_id ? String(bus.driver_id) : "",
       route_id: bus.route_id ? String(bus.route_id) : "",
+      traccar_device_id: bus.traccar_device_id || "",
     });
     setSaveError("");
     setShowEditModal(true);
@@ -164,6 +166,7 @@ export default function FleetPage() {
           capacity: Number(form.capacity) || 30,
           driver_id: form.driver_id ? Number(form.driver_id) : null,
           route_id: form.route_id ? Number(form.route_id) : null,
+          traccar_device_id: form.traccar_device_id.trim() || null,
         }),
       });
       const data = await res.json().catch(() => null);
@@ -194,6 +197,7 @@ export default function FleetPage() {
           capacity: Number(form.capacity) || 30,
           driver_id: form.driver_id ? Number(form.driver_id) : null,
           route_id: form.route_id ? Number(form.route_id) : null,
+          traccar_device_id: form.traccar_device_id.trim() || null,
         }),
       });
       const data = await res.json().catch(() => null);
@@ -500,6 +504,16 @@ export default function FleetPage() {
                 <option value="">No route</option>
                 {routes.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
               </select>
+            </label>
+            <label className="space-y-1.5 block">
+              <span className="text-sm font-medium" style={{ color: "var(--text-secondary)" }}>Traccar device ID</span>
+              <input value={form.traccar_device_id} onChange={e => setForm(f => ({ ...f, traccar_device_id: e.target.value }))}
+                placeholder="e.g. 5 (numeric id from Traccar, not the IMEI)"
+                className="w-full px-4 py-2.5 rounded-xl text-sm border outline-none focus:ring-2"
+                style={{ borderColor: "var(--border)", color: "var(--text-primary)" }} />
+              <span className="text-xs" style={{ color: "var(--slate)" }}>
+                Optional — links this bus to its live GPS tracker in Traccar.
+              </span>
             </label>
           </div>
         );
