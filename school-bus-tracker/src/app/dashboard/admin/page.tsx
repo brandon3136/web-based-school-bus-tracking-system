@@ -83,8 +83,6 @@ export default function AdminDashboard() {
     unsubscribeBus,
     onGpsUpdate,
     offGpsUpdate,
-    onTripStarted,
-    onTripEnded,
     onEmergencyAlert,
   } = useSocket();
 
@@ -155,38 +153,9 @@ export default function AdminDashboard() {
       }
     };
 
-    // Keep activeTrips in sync live, so "no active trip" state (and every
-    // other UI that derives from activeTrips) updates immediately instead of
-    // requiring a page refresh.
-    const handleTripStarted = (data: { tripId: number; busId: number; driverId: number }) => {
-      if (data.busId !== selectedBusId) return;
-      setActiveTrips((current) =>
-        current.some((t) => t.trip_id === data.tripId)
-          ? current
-          : [
-              ...current,
-              {
-                trip_id: data.tripId,
-                bus_id: data.busId,
-                driver_name: selectedBus?.driver_name || "",
-                plate_number: selectedBus?.plate_number || "",
-                route_name: selectedBus?.route_name || "",
-                students_onboard: 0,
-                started_at: new Date().toISOString(),
-              } as ActiveTrip,
-            ],
-      );
-    };
-    const handleTripEnded = (data: { tripId: number }) => {
-      setActiveTrips((current) => current.filter((t) => t.trip_id !== data.tripId));
-      setBusPos(null);
-    };
-
     if (typeof onGpsUpdate === "function") {
       onGpsUpdate(handleGpsUpdate);
     }
-    if (typeof onTripStarted === "function") onTripStarted(handleTripStarted);
-    if (typeof onTripEnded === "function") onTripEnded(handleTripEnded);
 
     return () => {
       isMounted = false;
@@ -196,10 +165,8 @@ export default function AdminDashboard() {
       if (typeof offGpsUpdate === "function") {
         offGpsUpdate(handleGpsUpdate);
       }
-      if (typeof offTripStarted === "function") offTripStarted(handleTripStarted);
-      if (typeof offTripEnded === "function") offTripEnded(handleTripEnded);
     };
-  }, [selectedBusId, subscribeBus, unsubscribeBus, onGpsUpdate, offGpsUpdate, onTripStarted, offTripStarted, onTripEnded, offTripEnded]);
+  }, [selectedBusId, subscribeBus, unsubscribeBus, onGpsUpdate, offGpsUpdate]);
 
   useEffect(() => {
     onEmergencyAlert((alert: EmergencyAlert) => {
@@ -506,7 +473,12 @@ export default function AdminDashboard() {
               </span>
             </div>
             <div style={{ height: "375px" }}>
-              {!selectedBus ? (
+              {selectedBus ? (
+                <BusMap
+                  busPosition={busPos ?? { lat: -6.8, lng: 39.28 }}
+                  height="375px"
+                />
+              ) : (
                 <div
                   className="flex items-center justify-center h-full"
                   style={{ color: "var(--slate)" }}
@@ -516,22 +488,6 @@ export default function AdminDashboard() {
                     <p className="text-sm">No bus selected</p>
                   </div>
                 </div>
-              ) : !selectedTrip ? (
-                <div
-                  className="flex items-center justify-center h-full"
-                  style={{ color: "var(--slate)" }}
-                >
-                  <div className="text-center">
-                    <MapPin size={32} className="mx-auto mb-2 opacity-40" />
-                    <p className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>No active trip</p>
-                    <p className="mt-1 text-xs">This bus isn't currently on a trip.</p>
-                  </div>
-                </div>
-              ) : (
-                <BusMap
-                  busPosition={busPos ?? { lat: -6.8, lng: 39.28 }}
-                  height="375px"
-                />
               )}
             </div>
           </div>
