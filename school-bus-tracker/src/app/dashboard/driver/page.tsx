@@ -27,6 +27,7 @@ interface BusInfo {
   capacity: number;
   route_id: number | null;
   route_name: string | null;
+  traccar_device_id: string | null;
 }
 
 interface StudentRecord {
@@ -88,6 +89,10 @@ export default function DriverDashboard() {
   const tripIdRef = useRef<number | null>(null);
   const busIdRef = useRef<number | null>(null);
 
+  // GPS source: track with this phone's browser location, or rely on a Traccar tracker device on the bus
+  const [gpsSource, setGpsSource] = useState<"device" | "tracker">("device");
+  const trackerPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   // Keep refs in sync with state for use inside geolocation callback
   useEffect(() => { tripIdRef.current = tripId; }, [tripId]);
   useEffect(() => { busIdRef.current = bus?.id ?? null; }, [bus]);
@@ -117,6 +122,11 @@ export default function DriverDashboard() {
 
         setBus(myBus);
 
+        // Default the GPS source: if this bus has a Traccar tracker linked, use it —
+        // this avoids ever prompting for browser location permission unnecessarily.
+        const preferredSource: "device" | "tracker" = myBus.traccar_device_id ? "tracker" : "device";
+        setGpsSource(preferredSource);
+
         // Fetch students for this bus
         const studentsRes = await apiFetch(`/api/buses/${myBus.id}/students`);
         if (studentsRes.ok) {
@@ -135,7 +145,7 @@ export default function DriverDashboard() {
           }
         }
 
-        // Check for existing active trip on this bus
+        // Check for existing active trip on this bus — and resume live tracking for it
         const activeRes = await apiFetch("/api/trips/active");
         if (activeRes.ok) {
           const activeTrips = await activeRes.json();
@@ -145,6 +155,11 @@ export default function DriverDashboard() {
               setTripId(myTrip.trip_id);
               setTripActive(true);
               setTripStartedAt(myTrip.started_at);
+              // busIdRef needs to be set before polling/watching starts
+              busIdRef.current = myBus.id;
+              tripIdRef.current = myTrip.trip_id;
+              if (preferredSource === "tracker") startTrackerPolling();
+              else startGpsTracking();
             }
           }
         }
@@ -244,11 +259,50 @@ export default function DriverDashboard() {
     setGpsError("");
   }
 
-  // Cleanup geolocation on unmount
+  // ── Tracker-device mode: don't use the phone's GPS at all — the backend's
+  // Traccar poller is already writing gps_logs for this bus, so just poll the
+  // latest logged position so the driver still sees their live location on the map.
+  function startTrackerPolling() {
+    setGpsError("");
+    setGpsTracking(true);
+
+    const poll = async () => {
+      const currentBusId = busIdRef.current;
+      if (!currentBusId) return;
+      try {
+        const res = await apiFetch(`/api/buses/${currentBusId}/location`);
+        if (!res.ok) return; // no fix logged yet — keep waiting silently
+        const loc = await res.json();
+        setGpsPosition({ lat: Number(loc.latitude), lng: Number(loc.longitude) });
+        setGpsSpeed(Math.round(Number(loc.speed_kmh) || 0));
+        setGpsAccuracy(null); // Traccar fixes don't carry the same accuracy figure as browser geolocation
+      } catch { /* Silently ignore — will retry on next poll */ }
+    };
+
+    poll(); // fetch immediately, then on an interval
+    trackerPollRef.current = setInterval(poll, 5000);
+  }
+
+  function stopTrackerPolling() {
+    if (trackerPollRef.current !== null) {
+      clearInterval(trackerPollRef.current);
+      trackerPollRef.current = null;
+    }
+    setGpsTracking(false);
+    setGpsPosition(null);
+    setGpsAccuracy(null);
+    setGpsSpeed(0);
+    setGpsError("");
+  }
+
+  // Cleanup geolocation / tracker polling on unmount
   useEffect(() => {
     return () => {
       if (watchIdRef.current !== null) {
         navigator.geolocation.clearWatch(watchIdRef.current);
+      }
+      if (trackerPollRef.current !== null) {
+        clearInterval(trackerPollRef.current);
       }
     };
   }, []);
@@ -300,11 +354,15 @@ export default function DriverDashboard() {
       setTripId(data.tripId);
       setTripActive(true);
       setTripStartedAt(new Date().toISOString());
-      setSuccessMsg("Trip started! GPS tracking active.");
+      setSuccessMsg(gpsSource === "tracker" ? "Trip started! Using the bus's GPS tracker." : "Trip started! GPS tracking active.");
       setTimeout(() => setSuccessMsg(""), 4000);
 
-      // Start GPS tracking
-      startGpsTracking();
+      // Start GPS tracking with whichever source the driver picked
+      if (gpsSource === "tracker") {
+        startTrackerPolling();
+      } else {
+        startGpsTracking();
+      }
     } catch { setTripError("Could not connect to the server."); }
     finally { setTripLoading(false); }
   }
@@ -315,8 +373,9 @@ export default function DriverDashboard() {
     setTripLoading(true);
     setTripError("");
 
-    // Stop GPS tracking first
+    // Stop whichever GPS source was active
     stopGpsTracking();
+    stopTrackerPolling();
 
     try {
       const res = await apiFetch("/api/trips/end", {
@@ -413,9 +472,11 @@ export default function DriverDashboard() {
               <div className="flex items-center gap-2">
                 <Radio size={14} style={{ color: gpsTracking ? "#0D9488" : "var(--slate)" }} className={gpsTracking ? "animate-pulse" : ""} />
                 <span className="text-xs font-medium" style={{ color: gpsTracking ? "#0D9488" : "var(--slate)" }}>
-                  {gpsTracking
-                    ? `GPS active${gpsAccuracy ? ` · ±${gpsAccuracy}m` : ""}${gpsSpeed > 0 ? ` · ${gpsSpeed} km/h` : ""}`
-                    : gpsError ? "GPS error" : "Waiting for GPS..."}
+                  {gpsSource === "tracker"
+                    ? (gpsPosition ? "Connected via tracker device" : "Connecting to tracker device...")
+                    : (gpsTracking
+                        ? `Phone GPS active${gpsAccuracy ? ` · ±${gpsAccuracy}m` : ""}${gpsSpeed > 0 ? ` · ${gpsSpeed} km/h` : ""}`
+                        : gpsError ? "GPS error" : "Waiting for GPS...")}
                 </span>
               </div>
             )}
@@ -449,7 +510,7 @@ export default function DriverDashboard() {
             </div>
           </div>
         )}
-        {gpsError && tripActive && (
+        {gpsError && tripActive && gpsSource === "device" && (
           <div className="mb-5 flex items-center gap-2 rounded-xl px-4 py-3 text-sm" style={{ backgroundColor: "var(--bus-yellow-light)", color: "var(--bus-yellow)" }}>
             <AlertTriangle size={14} />{gpsError}
           </div>
@@ -459,7 +520,7 @@ export default function DriverDashboard() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
           <StatCard label="Students Boarded" value={`${boardedCount}/${totalStudents}`} icon={Users} color="#F5A623" sub={tripActive ? "Tap to mark" : "Start trip first"} />
           <StatCard label="Route" value={bus?.route_name || "—"} icon={Route} color="#0D9488" sub={`${routeStops.length} stops`} />
-          <StatCard label="Speed" value={tripActive ? `${gpsSpeed} km/h` : "—"} icon={Bus} color="#0F2B5B" sub={tripActive && gpsTracking ? "Live GPS speed" : "Not tracking"} />
+          <StatCard label="Speed" value={tripActive ? `${gpsSpeed} km/h` : "—"} icon={Bus} color="#0F2B5B" sub={tripActive && gpsTracking ? (gpsSource === "tracker" ? "Live tracker speed" : "Live GPS speed") : "Not tracking"} />
           <StatCard label="Trip Duration" value={tripActive ? elapsed : "—"} icon={Clock} color="#7C3AED" sub={tripActive ? "In progress" : "No active trip"} />
         </div>
 
@@ -470,13 +531,17 @@ export default function DriverDashboard() {
               <div className="flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: tripActive ? "#F5A623" : "var(--slate)" }} />
                 <p className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>
-                  {tripActive ? (gpsPosition ? "Your live position" : "Waiting for GPS signal") : "Waiting for trip to start"}
+                  {tripActive
+                    ? (gpsPosition
+                        ? (gpsSource === "tracker" ? "Live position from tracker device" : "Your live position")
+                        : (gpsSource === "tracker" ? "Connecting to tracker device..." : "Waiting for GPS signal"))
+                    : "Waiting for trip to start"}
                 </p>
               </div>
               {bus && <span className="text-xs" style={{ color: "var(--slate)" }}>{bus.plate_number}</span>}
             </div>
             <div style={{ height: "335px" }}>
-              {mapPosition ? <BusMap busPosition={mapPosition} stops={mapStops} routeCoords={routeCoords} height="335px" /> : <div className="flex h-full items-center justify-center text-center"><div><MapPin size={30} className="mx-auto mb-3 opacity-30" style={{ color: "var(--slate)" }} /><p className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>{tripActive ? "Waiting for live GPS location" : "Waiting for trip to start"}</p><p className="mt-1 text-xs" style={{ color: "var(--slate)" }}>{tripActive ? "Your position will appear when GPS is available." : "Start your trip to begin live tracking."}</p></div></div>}
+              {mapPosition ? <BusMap busPosition={mapPosition} stops={mapStops} routeCoords={routeCoords} height="335px" /> : <div className="flex h-full items-center justify-center text-center"><div><MapPin size={30} className="mx-auto mb-3 opacity-30" style={{ color: "var(--slate)" }} /><p className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>{tripActive ? (gpsSource === "tracker" ? "Waiting for tracker device signal" : "Waiting for live GPS location") : "Waiting for trip to start"}</p><p className="mt-1 text-xs" style={{ color: "var(--slate)" }}>{tripActive ? (gpsSource === "tracker" ? "Position will appear once the tracker device reports a fix." : "Your position will appear when GPS is available.") : "Start your trip to begin live tracking."}</p></div></div>}
             </div>
           </div>
 
@@ -489,6 +554,37 @@ export default function DriverDashboard() {
                 <p className="text-sm text-center py-3" style={{ color: "var(--slate)" }}>No bus assigned to your account.</p>
               ) : (
                 <>
+                  {/* GPS source picker — locked once a trip is running */}
+                  <div className="mb-4">
+                    <span className="text-xs font-medium block mb-1.5" style={{ color: "var(--text-secondary)" }}>GPS Source</span>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button type="button" disabled={tripActive}
+                        onClick={() => { setGpsSource("device"); setGpsError(""); }}
+                        className="py-2 rounded-lg text-xs font-semibold border transition-colors disabled:opacity-60"
+                        style={gpsSource === "device"
+                          ? { backgroundColor: "#0F2B5B", color: "white", borderColor: "#0F2B5B" }
+                          : { backgroundColor: "transparent", color: "var(--text-secondary)", borderColor: "var(--border)" }}>
+                        This phone
+                      </button>
+                      <button type="button" disabled={tripActive || !bus.traccar_device_id}
+                        onClick={() => { setGpsSource("tracker"); setGpsError(""); }}
+                        title={!bus.traccar_device_id ? "No GPS tracker linked to this bus yet — ask your administrator to add one" : undefined}
+                        className="py-2 rounded-lg text-xs font-semibold border transition-colors disabled:opacity-40"
+                        style={gpsSource === "tracker"
+                          ? { backgroundColor: "#0F2B5B", color: "white", borderColor: "#0F2B5B" }
+                          : { backgroundColor: "transparent", color: "var(--text-secondary)", borderColor: "var(--border)" }}>
+                        Tracker device
+                      </button>
+                    </div>
+                    <p className="text-xs mt-1.5" style={{ color: "var(--slate)" }}>
+                      {!bus.traccar_device_id
+                        ? "No GPS tracker is linked to this bus, so only phone GPS is available."
+                        : gpsSource === "tracker"
+                          ? "Uses the bus's GPS tracker device — you can keep this page in the background."
+                          : "Uses this phone's location — keep this page open while driving."}
+                    </p>
+                  </div>
+
                   <button onClick={tripActive ? endTrip : startTrip} disabled={tripLoading}
                     className="w-full py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
                     style={tripActive
